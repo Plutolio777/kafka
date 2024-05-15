@@ -988,11 +988,13 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
         AppendCallbacks<K, V> appendCallbacks = new AppendCallbacks<K, V>(callback, this.interceptors, record);
 
         try {
+            // lyj 发送message时如果生成者是关闭状态则抛出异常
             throwIfProducerClosed();
             // first make sure the metadata for the topic is available
             long nowMs = time.milliseconds();
             ClusterAndWaitTime clusterAndWaitTime;
             try {
+                // lyj 等待获取元数据
                 clusterAndWaitTime = waitOnMetadata(record.topic(), record.partition(), nowMs, maxBlockTimeMs);
             } catch (KafkaException e) {
                 if (metadata.isClosed())
@@ -1115,35 +1117,51 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      */
     private ClusterAndWaitTime waitOnMetadata(String topic, Integer partition, long nowMs, long maxWaitMs) throws InterruptedException {
         // add topic to metadata topic list if it is not there already and reset expiry
+        // lyj 从metadata的缓存元数据中获取集群的元数据
         Cluster cluster = metadata.fetch();
 
+        // lyj 如果该topic已失效则抛出异常
         if (cluster.invalidTopics().contains(topic))
             throw new InvalidTopicException(topic);
 
+        // lyj 这里需要将topic增加到元数据中 暂时不知道有何用意
         metadata.add(topic, nowMs);
 
+        // lyj 这里会尝试从集群的元数据中获取分区数 在cluster中维护了一个topic和partitions的映射  cluster.partitionsByTopic
         Integer partitionsCount = cluster.partitionCountForTopic(topic);
         // Return cached metadata if we have it, and if the record's partition is either undefined
         // or within the known partition range
+        // lyj 这里是对用户传入的partition进行校验 如果大于集群的partition那肯定不行
         if (partitionsCount != null && (partition == null || partition < partitionsCount))
             return new ClusterAndWaitTime(cluster, 0);
 
+        // lyj 但是如果用户提供的分区大于集群中的 也不会立即抛异常 而是认为可能是数据延时 会尝试等待一段时间
+        // lyj 最大等待时间为生产者配置 max.block.ms
         long remainingWaitMs = maxWaitMs;
         long elapsed = 0;
         // Issue metadata requests until we have metadata for the topic and the requested partition,
         // or until maxWaitTimeMs is exceeded. This is necessary in case the metadata
         // is stale and the number of partitions for this topic has increased in the meantime.
         long nowNanos = time.nanoseconds();
+        // lyj 等待的退出条件
+        // - 1.partition满足条件
+        // - 2.循环时间大于max.block.ms、
+        // - 3.循环过程中出现异常
         do {
+            // lyj 记录debug日志
             if (partition != null) {
                 log.trace("Requesting metadata update for partition {} of topic {}.", partition, topic);
             } else {
                 log.trace("Requesting metadata update for topic {}.", topic);
             }
+            // lyj 向元数据中添加需要同步的topic 并申请sIO线程去同步元数据
+            // lyj 这里实际上是通过改变metadata的一些标志位 每次调用该方法都会返回但钱元数据的版本
             metadata.add(topic, nowMs + elapsed);
             int version = metadata.requestUpdateForTopic(topic);
+            // lyj 唤醒IO线程
             sender.wakeup();
             try {
+                // lyj 方法会阻塞 如果方法退出说明元数据已经更新一个版本了
                 metadata.awaitUpdate(version, remainingWaitMs);
             } catch (TimeoutException ex) {
                 // Rethrow with original maxWaitMs to prevent logging exception with remainingWaitMs
@@ -1151,10 +1169,13 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                         String.format("Topic %s not present in metadata after %d ms.",
                                 topic, maxWaitMs));
             }
+            // lyj 重新拉取新的集群信息max.block.ms 也就是说如果 max.block.ms 时间内还没有获取到正确的partition元数据
             cluster = metadata.fetch();
             elapsed = time.milliseconds() - nowMs;
+            // 如果发送时间超过max.block.ms 则抛出异常
             if (elapsed >= maxWaitMs) {
                 throw new TimeoutException(partitionsCount == null ?
+                        // lyj 这个异常真的是经常出现 终于知道是为啥了
                         String.format("Topic %s not present in metadata after %d ms.",
                                 topic, maxWaitMs) :
                         String.format("Partition %d of topic %s with partition count %d is not present in metadata after %d ms.",
@@ -1425,6 +1446,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
         return clientId;
     }
 
+    // lyj 获取元数据时的一个包装内部类，把获取元数据的等待时间也一起包装了
     private static class ClusterAndWaitTime {
         final Cluster cluster;
         final long waitedOnMetadataMs;

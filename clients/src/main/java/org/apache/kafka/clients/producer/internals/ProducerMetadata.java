@@ -114,14 +114,22 @@ public class ProducerMetadata extends Metadata {
      * Wait for metadata update until the current version is larger than the last version we know of
      */
     public synchronized void awaitUpdate(final int lastVersion, final long timeoutMs) throws InterruptedException {
+        // lyj time是kafka中定义的SystemTime类类似于实现了一个定时任务
         long currentTimeMs = time.milliseconds();
         long deadlineMs = currentTimeMs + timeoutMs < 0 ? Long.MAX_VALUE : currentTimeMs + timeoutMs;
+        // lyj 这个方法会等待 满足以下条件推出
+        // - 1.元数据的更新版本大于当前版本
+        // - 2.元数据产生异常 这个异常会记录在 MetaData.fatalException中（maybeThrowFatalException方法就是判断是否存在这样的异常）
+        // - 3.当前时间戳大于deadlineMs
+        // - 4.前两个条件不满足则会调用wait挂起线程 知道notify被调用
+
         time.waitObject(this, () -> {
             // Throw fatal exceptions, if there are any. Recoverable topic errors will be handled by the caller.
             maybeThrowFatalException();
             return updateVersion() > lastVersion || isClosed();
         }, deadlineMs);
 
+        // lyj 如果元数据已经被关闭了也会抛出异常
         if (isClosed())
             throw new KafkaException("Requested metadata update after close");
     }
