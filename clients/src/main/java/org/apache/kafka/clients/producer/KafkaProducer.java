@@ -1037,8 +1037,10 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             setReadOnly(record.headers());
             Header[] headers = record.headers().toArray();
 
+            // lyj 估算一下消息的大小 累加器中是有byte buffer池的这里提前估算大小也是为了后面是否使用byte buffer对象做准备
             int serializedSize = AbstractRecords.estimateSizeInBytesUpperBound(apiVersions.maxUsableProduceMagic(),
                     compressionType, serializedKey, serializedValue, headers);
+            // lyj 查看是否超过max.request.size 以及 buffer.memory 一个是控制message大小一个是确保累加器buffer内存是否足够
             ensureValidRecordSize(serializedSize);
             long timestamp = record.timestamp() == null ? nowMs : record.timestamp();
 
@@ -1047,6 +1049,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
 
             // Append the record to the accumulator.  Note, that the actual partition may be
             // calculated there and can be accessed via appendCallbacks.topicPartition.
+            // lyj 添加消息到累加器
             RecordAccumulator.RecordAppendResult result = accumulator.append(record.topic(), partition, timestamp, serializedKey,
                     serializedValue, headers, appendCallbacks, remainingWaitMs, abortOnNewBatch, nowMs, cluster);
             assert appendCallbacks.getPartition() != RecordMetadata.UNKNOWN_PARTITION;

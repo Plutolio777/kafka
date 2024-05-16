@@ -110,12 +110,20 @@ public abstract class AbstractRecords implements Records {
     }
 
     /**
-     * Get an upper bound estimate on the batch size needed to hold a record with the given fields. This is only
-     * an estimate because it does not take into account overhead from the compression algorithm.
+     * 根据给定字段获取记录所需批次大小的上限估计。这只是一个估计，因为它没有考虑压缩算法的开销。
+     *
+     * @param magic 记录关联的魔法数字，用于识别文件格式版本。
+     * @param compressionType 应用于记录的压缩类型，这会影响估计的大小。
+     * @param key 记录关联的键，可能为null。使用{@code Utils.wrapNullable}进行空值处理。
+     * @param value 记录关联的值，可能为null。与键类似，它也由{@code Utils.wrapNullable}进行处理。
+     * @param headers 代表记录头部的Header对象数组，不包括强制性的头部。
+     * @return 不考虑压缩开销的记录大小的估计上限（以字节为单位）。
      */
     public static int estimateSizeInBytesUpperBound(byte magic, CompressionType compressionType, byte[] key, byte[] value, Header[] headers) {
+        // 使用提供的实用方法估算大小，该方法优雅地处理了null键和值的情况。
         return estimateSizeInBytesUpperBound(magic, compressionType, Utils.wrapNullable(key), Utils.wrapNullable(value), headers);
     }
+
 
     /**
      * Get an upper bound estimate on the batch size needed to hold a record with the given fields. This is only
