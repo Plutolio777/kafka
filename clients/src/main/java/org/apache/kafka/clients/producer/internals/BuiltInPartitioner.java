@@ -325,6 +325,9 @@ public class BuiltInPartitioner {
      * Default hashing function to choose a partition from the serialized key bytes
      */
     public static int partitionForKey(final byte[] serializedKey, final int numPartitions) {
+        // lyj  1.Utils.murmur2(serializedKey) 对key进行hash采用的是 murmur2hash算法
+        // lyj  2.Utils.toPositive将hash值转为正数 使用位运算的方式将数据转换为正数应该挺高效的
+        // lyj  3.经典对根据partition数来进行取余得到最终的分区
         return Utils.toPositive(Utils.murmur2(serializedKey)) % numPartitions;
     }
 

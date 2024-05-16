@@ -1007,8 +1007,11 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 throw e;
             }
             nowMs += clusterAndWaitTime.waitedOnMetadataMs;
+            // lyj 计算剩余的block时间
             long remainingWaitMs = Math.max(0, maxBlockTimeMs - clusterAndWaitTime.waitedOnMetadataMs);
             Cluster cluster = clusterAndWaitTime.cluster;
+
+            // lyj 对key和value进行序列化操作
             byte[] serializedKey;
             try {
                 serializedKey = keySerializer.serialize(record.topic(), record.headers(), record.key());
@@ -1030,7 +1033,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             // which means that the RecordAccumulator would pick a partition using built-in logic (which may
             // take into account broker load, the amount of data produced to each partition, etc.).
             int partition = partition(record, serializedKey, serializedValue, cluster);
-
+            // q 暂时还不知道header是用来干啥的 这里是对header的一些处理
             setReadOnly(record.headers());
             Header[] headers = record.headers().toArray();
 
@@ -1111,6 +1114,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     }
 
     /**
+     * 这个方法需要集群元数据来判断提交的topic和partition是否是合理的
      * Wait for cluster metadata including partitions for the given topic to be available.
      * @param topic The topic we want metadata for
      * @param partition A specific partition expected to exist in metadata, or null if there's no preference
@@ -1121,6 +1125,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      * @throws KafkaException for all Kafka-related exceptions, including the case where this method is called after producer close
      */
     private ClusterAndWaitTime waitOnMetadata(String topic, Integer partition, long nowMs, long maxWaitMs) throws InterruptedException {
+
         // add topic to metadata topic list if it is not there already and reset expiry
         // lyj 从metadata的缓存元数据中获取集群的元数据
         Cluster cluster = metadata.fetch();
@@ -1188,11 +1193,13 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             }
             metadata.maybeThrowExceptionForTopic(topic);
             remainingWaitMs = maxWaitMs - elapsed;
+            // lyj 从更新后的集群元数据中获取partition
             partitionsCount = cluster.partitionCountForTopic(topic);
+            // lyj 判断partition是否满足要求
         } while (partitionsCount == null || (partition != null && partition >= partitionsCount));
-
+        // lyj 记录等待元数据耗时指标
         producerMetrics.recordMetadataWait(time.nanoseconds() - nowNanos);
-
+        // lyj 返回包装对象
         return new ClusterAndWaitTime(cluster, elapsed);
     }
 
@@ -1410,10 +1417,13 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      * partitioning logic).
      */
     private int partition(ProducerRecord<K, V> record, byte[] serializedKey, byte[] serializedValue, Cluster cluster) {
+        // lyj 如果用户选择了partition则使用用户定义的partition
         if (record.partition() != null)
             return record.partition();
 
+        // lyj 如果生产者指定了分区器 则调用分区器的partition方法进行分区选择
         if (partitioner != null) {
+            // lyj 指定分区器的选择发送分区
             int customPartition = partitioner.partition(
                 record.topic(), record.key(), serializedKey, record.value(), serializedValue, cluster);
             if (customPartition < 0) {
@@ -1423,10 +1433,14 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             return customPartition;
         }
 
+        // lyj 如果提交了key的话利用key来选择分区
         if (serializedKey != null && !partitionerIgnoreKeys) {
             // hash the keyBytes to choose a partition
+            // lyj 传入的参数是 key序列化后的字节数组以及topic的partition数
             return BuiltInPartitioner.partitionForKey(serializedKey, cluster.partitionsForTopic(record.topic()).size());
         } else {
+            // lyj 如果用户创建生产者没有指定分区器 提交message时也没有指定partition或者key为null 则返回UNKNOWN_PARTITION
+            // lyj 这意味着这条message的分区选择将交给累加器来执行
             return RecordMetadata.UNKNOWN_PARTITION;
         }
     }

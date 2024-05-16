@@ -443,9 +443,9 @@ public class Metadata implements Closeable {
     }
 
     /**
-     * If any non-retriable exceptions were encountered during metadata update, throw exception if the exception
-     * is fatal or related to the specified topic. All exceptions from the last metadata update are cleared.
-     * This is used by the producer to propagate topic metadata errors for send requests.
+     * 如果在元数据更新过程中遇到任何不可重试的异常，则在异常时抛出异常
+     * 是致命的或与指定主题相关的。上次元数据更新中的所有异常都将被清除。
+     * 生产者使用它来传播发送请求的主题元数据错误。
      */
     public synchronized void maybeThrowExceptionForTopic(String topic) {
         clearErrorsAndMaybeThrowException(() -> recoverableExceptionForTopic(topic));
