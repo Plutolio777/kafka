@@ -23,20 +23,23 @@ import java.io.Closeable;
 
 /**
  * Partitioner Interface
+ * 分区器的顶级接口 用于Producer发送消息时选择对应的分区
  */
 public interface Partitioner extends Configurable, Closeable {
 
     /**
      * Compute the partition for the given record.
-     *
-     * @param topic The topic name
-     * @param key The key to partition on (or null if no key)
-     * @param keyBytes The serialized key to partition on( or null if no key)
-     * @param value The value to partition on or null
-     * @param valueBytes The serialized value to partition on or null
-     * @param cluster The current cluster metadata
+     * 这个方法定义了分区的逻辑，用于决定给定记录应该被分配到哪个分区。
+     * @param topic The topic name 分配记录的目标主题名称。
+     * @param key The key to partition on (or null if no key) 用于分区的键（如果不存在键则为null）。
+     * @param keyBytes The serialized key to partition on( or null if no key) 用于分区的序列化键（如果不存在键则为null）。
+     * @param value The value to partition on or null 用于分区的值（或为null）。
+     * @param valueBytes The serialized value to partition on or null 用于分区的序列化值（或为null）。
+     * @param cluster The current cluster metadata 当前集群的元数据，包含分区和 broker 的信息。
+     * @return int 返回分配给给定记录的分区编号。
      */
     int partition(String topic, Object key, byte[] keyBytes, Object value, byte[] valueBytes, Cluster cluster);
+
 
     /**
      * This is called when partitioner is closed.
@@ -44,16 +47,17 @@ public interface Partitioner extends Configurable, Closeable {
     void close();
 
     /**
-     * Note this method is only implemented in DefatultPartitioner and UniformStickyPartitioner which
-     * are now deprecated.  See KIP-794 for more info.
+     * 通知分区器即将创建一个新的批次。当使用粘性分区器时，此方法可以更改新批次选择的粘性分区。
+     * 注意：此方法仅在DefaultPartitioner和UniformStickyPartitioner中实现，这两个分区器现已废弃。
+     * 有关更多信息，请参阅KIP-794。
      *
-     * Notifies the partitioner a new batch is about to be created. When using the sticky partitioner,
-     * this method can change the chosen sticky partition for the new batch.
-     * @param topic The topic name
-     * @param cluster The current cluster metadata
-     * @param prevPartition The partition previously selected for the record that triggered a new batch
+     * @param topic 主题名称
+     * @param cluster 当前集群元数据
+     * @param prevPartition 之前为触发新批次记录选择的分区
      */
     @Deprecated
     default void onNewBatch(String topic, Cluster cluster, int prevPartition) {
+        // 此处为onNewBatch方法的默认实现，子类可以通过重写此方法来提供特定行为。
     }
+
 }

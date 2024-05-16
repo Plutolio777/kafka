@@ -31,6 +31,10 @@ public class StringSerializer implements Serializer<String> {
 
     @Override
     public void configure(Map<String, ?> configs, boolean isKey) {
+        // lyj 获取对应的encoding 默认是采用utf-8编码
+        // - key.serializer.encoding key的编码格式
+        // - value.serializer.encoding value的编码格式
+        // - serializer.encoding 全局编码格式
         String propertyName = isKey ? "key.serializer.encoding" : "value.serializer.encoding";
         Object encodingValue = configs.get(propertyName);
         if (encodingValue == null)
@@ -41,6 +45,7 @@ public class StringSerializer implements Serializer<String> {
 
     @Override
     public byte[] serialize(String topic, String data) {
+        // lyj 采用对应的编码格式将字符串编码成字节数组
         try {
             if (data == null)
                 return null;

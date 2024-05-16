@@ -48,11 +48,17 @@ import java.util.Objects;
  */
 public class ProducerRecord<K, V> {
 
+    // lyj 记录的主题名称
     private final String topic;
+    // lyj 记录将被发送到的分区号，可以是null
     private final Integer partition;
+    // lyj 记录的头部信息，可以包含多个header 常用来设置一些与应用相关的信息
     private final Headers headers;
+    // lyj 记录的键，可以是null 作为mrecord的附加信息还可以用来计算partition
     private final K key;
+    // lyj 记录的值，可以是null 如果为空则表示为墓碑消息
     private final V value;
+    // lyj 记录的时间戳，以毫秒为单位，可以是null
     private final Long timestamp;
 
     /**
@@ -65,6 +71,8 @@ public class ProducerRecord<K, V> {
      * @param key The key that will be included in the record
      * @param value The record contents
      * @param headers the headers that will be included in the record
+     * ProducerRecord类用于创建要发送到Kafka的主题的记录。
+     * 它包含主题名称、可选的分区号、可选的键、值和时间戳。
      */
     public ProducerRecord(String topic, Integer partition, Long timestamp, K key, V value, Iterable<Header> headers) {
         if (topic == null)
@@ -132,17 +140,18 @@ public class ProducerRecord<K, V> {
     public ProducerRecord(String topic, K key, V value) {
         this(topic, null, null, key, value, null);
     }
-    
+
+
     /**
-     * Create a record with no key
-     * 
-     * @param topic The topic this record should be sent to
-     * @param value The record contents
+     * 构造一个新的ProducerRecord实例，用于发送到指定的主题(topic)的值(value)。
+     * 这个构造函数初始化一个带有默认键、分区、时间戳和元数据的生产者记录，除了指定的主题和值外，其他字段都为null。
+     *
+     * @param topic 消息将要发送到的主题名称。
+     * @param value 消息的值，该消息将被发送到指定的主题。
      */
     public ProducerRecord(String topic, V value) {
         this(topic, null, null, null, value, null);
     }
-
     /**
      * @return The topic this record is being sent to
      */

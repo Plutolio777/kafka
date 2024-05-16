@@ -150,10 +150,11 @@ public class MetadataCache {
         // We want the most recent topic ID. We start with the previous ID stored for retained topics and then
         // update with newest information from the MetadataResponse. We always take the latest state, removing existing
         // topic IDs if the latest state contains the topic name but not a topic ID.
+        // lyj 这里是在原有的topic中判断哪些topic需要保留 保留策略具体逻辑是上层传入的BiPredicate
         Map<String, Uuid> newTopicIds = topicIds.entrySet().stream()
                 .filter(entry -> shouldRetainTopic.test(entry.getKey()))
                 .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-
+        // lyj 遍历新增的全量partitions，如果有topicId则更新，没有则删除
         for (PartitionMetadata partition : addPartitions) {
             newMetadataByPartition.put(partition.topicPartition, partition);
             Uuid id = topicIds.get(partition.topic());
@@ -163,16 +164,18 @@ public class MetadataCache {
                 // Remove if the latest metadata does not have a topic ID
                 newTopicIds.remove(partition.topic());
         }
+        // lyj 老的partitions中判断哪些partition需要保留
         for (Map.Entry<TopicPartition, PartitionMetadata> entry : metadataByPartition.entrySet()) {
             if (shouldRetainTopic.test(entry.getKey().topic())) {
                 newMetadataByPartition.putIfAbsent(entry.getKey(), entry.getValue());
             }
         }
-
+        // lyj 合并三个topics合集 逻辑就是满足shouldRetainTopic条件的将他加入 addUnauthorizedTopics
         Set<String> newUnauthorizedTopics = fillSet(addUnauthorizedTopics, unauthorizedTopics, shouldRetainTopic);
         Set<String> newInvalidTopics = fillSet(addInvalidTopics, invalidTopics, shouldRetainTopic);
         Set<String> newInternalTopics = fillSet(addInternalTopics, internalTopics, shouldRetainTopic);
 
+        // lyj 返回新的MetadataCache
         return new MetadataCache(newClusterId, newNodes, newMetadataByPartition.values(), newUnauthorizedTopics,
                 newInvalidTopics, newInternalTopics, newController, newTopicIds);
     }

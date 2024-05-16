@@ -30,43 +30,56 @@ import java.util.Map;
  *
  * @param <T> Type to be deserialized into.
  */
+/**
+ * Deserializer接口定义了如何从字节数据中反序列化出特定类型的对象。
+ * 这个接口扩展了Closeable接口，以支持资源的释放。
+ *
+ * @param <T> 要反序列化的对象类型
+ */
 public interface Deserializer<T> extends Closeable {
 
     /**
-     * Configure this class.
-     * @param configs configs in key/value pairs
-     * @param isKey whether is for key or value
+     * 配置Deserializer。
+     * 这个方法允许通过键值对的形式传递配置信息，并且可以区分这些配置是用于键还是值。
+     *
+     * @param configs 配置信息的键值对
+     * @param isKey 指示配置是用于键还是值
      */
     default void configure(Map<String, ?> configs, boolean isKey) {
-        // intentionally left blank
+        // 故意留空，子类可以根据需要重写此方法
     }
 
     /**
-     * Deserialize a record value from a byte array into a value or object.
-     * @param topic topic associated with the data
-     * @param data serialized bytes; may be null; implementations are recommended to handle null by returning a value or null rather than throwing an exception.
-     * @return deserialized typed data; may be null
+     * 从一个字节数组中反序列化出一个记录的值或对象。
+     * 此方法应能够处理null输入，并且推荐实现能够在遇到null时返回一个值或null，而不是抛出异常。
+     *
+     * @param topic 与数据关联的主题
+     * @param data 序列化的字节数据；可能为null
+     * @return 反序列化的有类型数据；可能为null
      */
     T deserialize(String topic, byte[] data);
 
     /**
-     * Deserialize a record value from a byte array into a value or object.
-     * @param topic topic associated with the data
-     * @param headers headers associated with the record; may be empty.
-     * @param data serialized bytes; may be null; implementations are recommended to handle null by returning a value or null rather than throwing an exception.
-     * @return deserialized typed data; may be null
+     * 从一个字节数组中反序列化出一个记录的值或对象。
+     * 提供了额外的headers参数，以包含与记录相关联的元数据。
+     * 默认实现是调用没有headers参数的deserialize方法。
+     *
+     * @param topic 与数据关联的主题
+     * @param headers 与记录关联的头部信息；可能为空
+     * @param data 序列化的字节数据；可能为null
+     * @return 反序列化的有类型数据；可能为null
      */
     default T deserialize(String topic, Headers headers, byte[] data) {
         return deserialize(topic, data);
     }
 
     /**
-     * Close this deserializer.
-     * <p>
-     * This method must be idempotent as it may be called multiple times.
+     * 关闭Deserializer。
+     * 这个方法必须是幂等的，因为它可能被多次调用。
      */
     @Override
     default void close() {
-        // intentionally left blank
+        // 故意留空，子类可以根据需要重写此方法来处理资源释放
     }
 }
+

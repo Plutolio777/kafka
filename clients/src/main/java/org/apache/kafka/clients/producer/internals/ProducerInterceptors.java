@@ -56,6 +56,8 @@ public class ProducerInterceptors<K, V> implements Closeable {
      */
     public ProducerRecord<K, V> onSend(ProducerRecord<K, V> record) {
         ProducerRecord<K, V> interceptRecord = record;
+        // lyj 这里会再消息发送前，对消息进行拦截，拦截器会修改消息，然后返回给消息发送者，发送者再发送消息
+        // lyj 多个拦截器之间尽量不要相互依赖，因为前一个拦截器如果执行异常 后一个依然会执行
         for (ProducerInterceptor<K, V> interceptor : this.interceptors) {
             try {
                 interceptRecord = interceptor.onSend(interceptRecord);

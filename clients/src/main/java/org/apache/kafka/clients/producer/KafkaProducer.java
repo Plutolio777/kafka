@@ -957,7 +957,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      */
     @Override
     public Future<RecordMetadata> send(ProducerRecord<K, V> record, Callback callback) {
-        // intercept the record, which can be potentially modified; this method does not throw exceptions
+        // lyj 这里会调用所有已注册拦截器的onSend方法
         ProducerRecord<K, V> interceptedRecord = this.interceptors.onSend(record);
         return doSend(interceptedRecord, callback);
     }
@@ -985,6 +985,11 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
         // Append callback takes care of the following:
         //  - call interceptors and user callback on completion
         //  - remember partition that is calculated in RecordAccumulator.append
+        // lyj 生成回调实例:
+        // - 1.记录record放入累加器之后选择的分区
+        // - 2.在消息发送成功或者失败之后执行拦截器的回调方法
+        // - 3.执行用户传入的回调方法
+
         AppendCallbacks<K, V> appendCallbacks = new AppendCallbacks<K, V>(callback, this.interceptors, record);
 
         try {
@@ -994,7 +999,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             long nowMs = time.milliseconds();
             ClusterAndWaitTime clusterAndWaitTime;
             try {
-                // lyj 等待获取元数据
+                // lyj 等待获取集群元数据
                 clusterAndWaitTime = waitOnMetadata(record.topic(), record.partition(), nowMs, maxBlockTimeMs);
             } catch (KafkaException e) {
                 if (metadata.isClosed())
@@ -1498,8 +1503,11 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      *  - partition callback
      */
     private class AppendCallbacks<K, V> implements RecordAccumulator.AppendCallbacks {
+        // 用户的回调函数
         private final Callback userCallback;
+        // 拦截器
         private final ProducerInterceptors<K, V> interceptors;
+
         private final String topic;
         private final Integer recordPartition;
         private final String recordLogString;

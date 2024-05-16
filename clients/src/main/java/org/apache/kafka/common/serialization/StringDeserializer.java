@@ -31,6 +31,10 @@ public class StringDeserializer implements Deserializer<String> {
 
     @Override
     public void configure(Map<String, ?> configs, boolean isKey) {
+        // lyj 获取对应的encoding 默认是采用utf-8编码
+        // - key.serializer.encoding key的编码格式
+        // - value.serializer.encoding value的编码格式
+        // - serializer.encoding 全局编码格式
         String propertyName = isKey ? "key.deserializer.encoding" : "value.deserializer.encoding";
         Object encodingValue = configs.get(propertyName);
         if (encodingValue == null)
@@ -41,6 +45,7 @@ public class StringDeserializer implements Deserializer<String> {
 
     @Override
     public String deserialize(String topic, byte[] data) {
+        // lyj 采用对应的编码格式将字节数组解码成字符串
         try {
             if (data == null)
                 return null;
