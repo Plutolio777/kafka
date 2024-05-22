@@ -1226,6 +1226,7 @@ public final class Utils {
      * @throws IOException For any errors writing to the output
      */
     public static void writeTo(DataOutput out, ByteBuffer buffer, int length) throws IOException {
+
         if (buffer.hasArray()) {
             out.write(buffer.array(), buffer.position() + buffer.arrayOffset(), length);
         } else {
