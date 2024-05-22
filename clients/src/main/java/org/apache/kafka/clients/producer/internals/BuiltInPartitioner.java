@@ -64,8 +64,11 @@ public class BuiltInPartitioner {
 
     /**
      * Calculate the next partition for the topic based on the partition load stats.
+     * 根据提供的集群元数据计算下一个partition的逻辑
      */
     private int nextPartition(Cluster cluster) {
+        // lyj 多线程环境下使用ThreadLocalRandom生成随机整数
+        // lyj 累加器的分区逻辑是根据随机数进行取模获取分区数 这样是为了将message均匀分布？？？
         int random = mockRandom != null ? mockRandom.get() : Utils.toPositive(ThreadLocalRandom.current().nextInt());
 
         // Cache volatile variable in local variable.
@@ -75,15 +78,21 @@ public class BuiltInPartitioner {
         if (partitionLoadStats == null) {
             // We don't have stats to do adaptive partitioning (or it's disabled), just switch to the next
             // partition based on uniform distribution.
+            // lyj 根据topic从集群元数据中获取所有的partition信息
+            // lyj 注意 availablePartitionsForTopic里面记录的是所有存在副本的分区 partitionsForTopic 是所有分区
+            // lyj 也就是说累加器选择分区的时候是优先选择具备副本的分区保证消息可靠信 想的真周到
             List<PartitionInfo> availablePartitions = cluster.availablePartitionsForTopic(topic);
             if (availablePartitions.size() > 0) {
+                // lyj 使用随机数取模选取partition
                 partition = availablePartitions.get(random % availablePartitions.size()).partition();
             } else {
+                // lyj 如果availablePartitions没有partition信息，则从集群元数据中获取所有的partition信息
                 // We don't have available partitions, just pick one among all partitions.
                 List<PartitionInfo> partitions = cluster.partitionsForTopic(topic);
                 partition = random % partitions.size();
             }
         } else {
+            // q 这里的逻辑还没看明白 暂时不知道这个partitionLoadStats是啥意思
             // Calculate next partition based on load distribution.
             // Note that partitions without leader are excluded from the partitionLoadStats.
             assert partitionLoadStats.length > 0;
@@ -124,25 +133,29 @@ public class BuiltInPartitioner {
     }
 
     /**
-     * Peek currently chosen sticky partition.  This method works in conjunction with {@link #isPartitionChanged}
-     * and {@link #updatePartitionInfo}.  The workflow is the following:
+     * 获取当前选择的粘性分区信息。此方法与{@link #isPartitionChanged}和{@link #updatePartitionInfo}配合使用。
+     * 工作流程如下：
      *
-     * 1. peekCurrentPartitionInfo is called to know which partition to lock.
-     * 2. Lock partition's batch queue.
-     * 3. isPartitionChanged under lock to make sure that nobody raced us.
-     * 4. Append data to buffer.
-     * 5. updatePartitionInfo to update produced bytes and maybe switch partition.
+     * 1. 调用peekCurrentPartitionInfo以了解要锁定的分区。
+     * 2. 锁定分区的批处理队列。
+     * 3. 在锁的保护下调用isPartitionChanged，以确保没有其他线程与我们竞争。
+     * 4. 将数据追加到缓冲区。
+     * 5. 调用updatePartitionInfo来更新产生的字节并可能切换分区。
      *
-     *  It's important that steps 3-5 are under partition's batch queue lock.
+     * 重要的是，步骤3-5必须在分区的批处理队列锁的保护下进行。
      *
-     * @param cluster The cluster information (needed if there is no current partition)
-     * @return sticky partition info object
+     * @param cluster 集群信息（如果当前没有分区，则需要此信息）
+     * @return 粘性分区信息对象
      */
     StickyPartitionInfo peekCurrentPartitionInfo(Cluster cluster) {
+        // lyj StickyPartitionInfo 是被AtomicReference包装的 保证了一个线程能够获取 StickyPartitionInfo
         StickyPartitionInfo partitionInfo = stickyPartitionInfo.get();
         if (partitionInfo != null)
             return partitionInfo;
 
+        // lyj 未获取到则创建StickyPartitionInfo
+        // lyj 1. nextPartition方法计算partition
+        // lyj 2, 包装成StickyPartitionInfo
         // We're the first to create it.
         partitionInfo = new StickyPartitionInfo(nextPartition(cluster));
         if (stickyPartitionInfo.compareAndSet(null, partitionInfo))

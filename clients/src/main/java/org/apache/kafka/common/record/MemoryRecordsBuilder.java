@@ -61,6 +61,7 @@ public class MemoryRecordsBuilder implements AutoCloseable {
     private final int initialPosition;
     private final long baseOffset;
     private final long logAppendTime;
+    // lyj 标志这个batch是否为控制批次
     private final boolean isControlBatch;
     private final int partitionLeaderEpoch;
     private final int writeLimit;
@@ -70,7 +71,7 @@ public class MemoryRecordsBuilder implements AutoCloseable {
     // from previous batches before appending any records.
     private float estimatedCompressionRatio = 1.0F;
 
-    // Used to append records, may compress data on the fly
+    // lyj 用于附加记录，可以动态压缩数据
     private DataOutputStream appendStream;
     private boolean isTransactional;
     private long producerId;
@@ -430,10 +431,12 @@ public class MemoryRecordsBuilder implements AutoCloseable {
 
     /**
      * Append a new record at the given offset.
+     * lyj 根据给定的偏移量添加记录
      */
     private void appendWithOffset(long offset, boolean isControlRecord, long timestamp, ByteBuffer key,
                                   ByteBuffer value, Header[] headers) {
         try {
+            // lyj 如果记录是控制类型 但是batch不是则抛出异常
             if (isControlRecord != isControlBatch)
                 throw new IllegalArgumentException("Control records can only be appended to control batches");
 
@@ -444,6 +447,7 @@ public class MemoryRecordsBuilder implements AutoCloseable {
             if (timestamp < 0 && timestamp != RecordBatch.NO_TIMESTAMP)
                 throw new IllegalArgumentException("Invalid negative timestamp " + timestamp);
 
+            // lyj v2版本以下不支持headers
             if (magic < RecordBatch.MAGIC_VALUE_V2 && headers != null && headers.length > 0)
                 throw new IllegalArgumentException("Magic v" + magic + " does not support record headers");
 
@@ -451,8 +455,10 @@ public class MemoryRecordsBuilder implements AutoCloseable {
                 baseTimestamp = timestamp;
 
             if (magic > RecordBatch.MAGIC_VALUE_V1) {
+                // lyj v1 后的版本使用这个方法追加记录
                 appendDefaultRecord(offset, timestamp, key, value, headers);
             } else {
+                // lyj 旧版使用这个追加记录
                 appendLegacyRecord(offset, timestamp, key, value, magic);
             }
         } catch (IOException e) {
@@ -550,6 +556,7 @@ public class MemoryRecordsBuilder implements AutoCloseable {
      * @param headers The record headers if there are any
      */
     public void append(long timestamp, ByteBuffer key, ByteBuffer value, Header[] headers) {
+        // lyj nextSequentialOffset producer batch中最后偏移量
         appendWithOffset(nextSequentialOffset(), timestamp, key, value, headers);
     }
 
@@ -571,6 +578,7 @@ public class MemoryRecordsBuilder implements AutoCloseable {
      * @param headers The record headers if there are any
      */
     public void append(long timestamp, byte[] key, byte[] value, Header[] headers) {
+        // lyj 将key和value包装成bytebuffer
         append(timestamp, wrapNullable(key), wrapNullable(value), headers);
     }
 
@@ -719,10 +727,13 @@ public class MemoryRecordsBuilder implements AutoCloseable {
 
     private void appendDefaultRecord(long offset, long timestamp, ByteBuffer key, ByteBuffer value,
                                      Header[] headers) throws IOException {
+        // lyj 确保append stream是打开状态
         ensureOpenForRecordAppend();
         int offsetDelta = (int) (offset - baseOffset);
         long timestampDelta = timestamp - baseTimestamp;
+        // lyj 将数据写入到append stream中
         int sizeInBytes = DefaultRecord.writeTo(appendStream, offsetDelta, timestampDelta, key, value, headers);
+        // lyj 更新记录的一些指标
         recordWritten(offset, timestamp, sizeInBytes);
     }
 
@@ -802,6 +813,7 @@ public class MemoryRecordsBuilder implements AutoCloseable {
      * appended, then this returns true.
      */
     public boolean hasRoomFor(long timestamp, byte[] key, byte[] value, Header[] headers) {
+        // lyj wrapNullable 会将byte[]包装成bytebuffer
         return hasRoomFor(timestamp, wrapNullable(key), wrapNullable(value), headers);
     }
 
@@ -814,6 +826,7 @@ public class MemoryRecordsBuilder implements AutoCloseable {
      * re-allocation in the underlying byte buffer stream.
      */
     public boolean hasRoomFor(long timestamp, ByteBuffer key, ByteBuffer value, Header[] headers) {
+        // lyj 如果当前batch已经满了返回false
         if (isFull())
             return false;
 

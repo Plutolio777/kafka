@@ -41,8 +41,11 @@ public final class Cluster {
     private final Set<String> internalTopics;
     private final Node controller;
     private final Map<TopicPartition, PartitionInfo> partitionsByTopicPartition;
+    // lyj 全量的分区信息
     private final Map<String, List<PartitionInfo>> partitionsByTopic;
+    // lyj 这个里面记录的是有分区副本的partition
     private final Map<String, List<PartitionInfo>> availablePartitionsByTopic;
+
     private final Map<Integer, List<PartitionInfo>> partitionsByNode;
     private final Map<Integer, Node> nodesById;
     private final ClusterResource clusterResource;

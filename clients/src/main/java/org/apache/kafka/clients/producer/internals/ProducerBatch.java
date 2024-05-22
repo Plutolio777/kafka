@@ -58,25 +58,43 @@ import static org.apache.kafka.common.record.RecordBatch.NO_TIMESTAMP;
 public final class ProducerBatch {
 
     private static final Logger log = LoggerFactory.getLogger(ProducerBatch.class);
-
+    
+    // lyj 标志batch的发送状态  ABORTED被终止 FAILED发送失败 SUCCEEDED发送成功
     private enum FinalState { ABORTED, FAILED, SUCCEEDED }
 
+    // lyj 记录了批次创建的时间戳
     final long createdMs;
+
+    // lyj 批次所属的主题分区，用于标识批次要发送到哪个主题和分区。
     final TopicPartition topicPartition;
+
+    // lyj 用于跟踪批次发送的结果和状态。
     final ProduceRequestResult produceFuture;
 
+    // lyj 存储与批次中各个记录关联的回调函数和元数据。在批次发送完成后，这些回调函数会被调用。
     private final List<Thunk> thunks = new ArrayList<>();
+    // lyj 用于构建批次中的消息记录。
     private final MemoryRecordsBuilder recordsBuilder;
+    // lyj 跟踪批次的重试次数。
     private final AtomicInteger attempts = new AtomicInteger(0);
+    // lyj 标志是否为拆分批次。
     private final boolean isSplitBatch;
+    // lyj 跟踪批次的最终状态。
     private final AtomicReference<FinalState> finalState = new AtomicReference<>(null);
-
+    // lyj 批次中包含的记录数。
     int recordCount;
+    // lyj 批次中包含的最大记录大小。
     int maxRecordSize;
+
+    // lyj 跟踪批次的尝试次数和时间戳。
     private long lastAttemptMs;
+    // lyj 跟踪批次的最后一次追加时间戳。
     private long lastAppendTime;
+    // lyj 记录批次被从缓冲区中提取出来以准备发送的时间戳。
     private long drainedMs;
+    // lyj 标志此批次是否需要重试发送。
     private boolean retry;
+    // lyj 标志此批次是否被重新打开用于追加新的记录。
     private boolean reopened;
 
     public ProducerBatch(TopicPartition tp, MemoryRecordsBuilder recordsBuilder, long createdMs) {
@@ -103,13 +121,18 @@ public final class ProducerBatch {
      * @return The RecordSend corresponding to this record or null if there isn't sufficient room.
      */
     public FutureRecordMetadata tryAppend(long timestamp, byte[] key, byte[] value, Header[] headers, Callback callback, long now) {
+        // lyj 是否还有容量可以写入
         if (!recordsBuilder.hasRoomFor(timestamp, key, value, headers)) {
             return null;
         } else {
+            // lyj 将相关数据写入append stream这个DataOutputStream中
             this.recordsBuilder.append(timestamp, key, value, headers);
+            // lyj 记录最大记录大小
             this.maxRecordSize = Math.max(this.maxRecordSize, AbstractRecords.estimateSizeInBytesUpperBound(magic(),
                     recordsBuilder.compressionType(), key, value, headers));
+            // lyj 记录最后添加时间戳
             this.lastAppendTime = now;
+            // lyj 记录FutureRecordMetadata
             FutureRecordMetadata future = new FutureRecordMetadata(this.produceFuture, this.recordCount,
                                                                    timestamp,
                                                                    key == null ? -1 : key.length,
@@ -117,7 +140,9 @@ public final class ProducerBatch {
                                                                    Time.SYSTEM);
             // we have to keep every future returned to the users in case the batch needs to be
             // split to several new batches and resent.
+            // lyj 添加thunk缓存 这个thunk是数据写入到stream中但是还没有发送的一个缓存记录 当数据发送后会从thunk中查询并执行回调
             thunks.add(new Thunk(callback, future));
+            // lyj 记录数自增
             this.recordCount++;
             return future;
         }

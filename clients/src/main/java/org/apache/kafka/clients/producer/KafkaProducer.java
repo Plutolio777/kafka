@@ -1049,18 +1049,25 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
 
             // Append the record to the accumulator.  Note, that the actual partition may be
             // calculated there and can be accessed via appendCallbacks.topicPartition.
-            // lyj 添加消息到累加器
+            // lyj 添加消息到累加器， 实际上也就是将message添加到Deque<ProducerBatch> 默认会追加到尾部
+            // lyj RecordAppendResult 获取添加记录的结果
+            // lyj -如果当前Batch还没满，则追加成功，返回追加成功后对result的一些描述
+            // lyj -如果当前Batch已满，则关闭当前Batch，由于abortForNewBatch的参数自始终为true，则直接返回“Batch创建失败”的结果
             RecordAccumulator.RecordAppendResult result = accumulator.append(record.topic(), partition, timestamp, serializedKey,
                     serializedValue, headers, appendCallbacks, remainingWaitMs, abortOnNewBatch, nowMs, cluster);
             assert appendCallbacks.getPartition() != RecordMetadata.UNKNOWN_PARTITION;
 
+            // lyj 如果在上一步发现Batch已满，则按下面的逻辑创建新的Batch并重新append
             if (result.abortForNewBatch) {
                 int prevPartition = partition;
+                // lyj partitioner的回调，在创建新的batch时
                 onNewBatch(record.topic(), cluster, prevPartition);
+                // lyj 重新选择分区
                 partition = partition(record, serializedKey, serializedValue, cluster);
                 if (log.isTraceEnabled()) {
                     log.trace("Retrying append due to new batch creation for topic {} partition {}. The old partition was {}", record.topic(), partition, prevPartition);
                 }
+                // lyj 尝试重新添加到累加器 abortOnNewBatch 注意这个abortOnNewBatch是false了
                 result = accumulator.append(record.topic(), partition, timestamp, serializedKey,
                     serializedValue, headers, appendCallbacks, remainingWaitMs, false, nowMs, cluster);
             }
@@ -1078,6 +1085,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 log.trace("Waking up the sender since topic {} partition {} is either full or getting a new batch", record.topic(), appendCallbacks.getPartition());
                 this.sender.wakeup();
             }
+            // lyj 返回future对象 future.get可以同步获取kafka发送结果
             return result.future;
             // handling exceptions and record the errors;
             // for API exceptions return them in the future,

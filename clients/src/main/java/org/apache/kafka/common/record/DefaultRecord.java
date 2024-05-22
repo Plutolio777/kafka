@@ -159,7 +159,17 @@ public class DefaultRecord implements Record {
     }
 
     /**
-     * Write the record to `out` and return its size.
+     * 将记录写入到指定的 `out` 流中，并返回记录的大小（以字节为单位）。
+     *
+     * @param out 用于写入数据的 DataOutputStream。
+     * @param offsetDelta 偏移量增量。
+     * @param timestampDelta 时间戳增量。
+     * @param key 记录的键，可以为 null。
+     * @param value 记录的值，可以为 null。
+     * @param headers 记录的头部信息，不可为 null。
+     * @return 记录的总大小（包括大小前缀）。
+     * @throws IOException 如果在写入过程中发生 I/O 错误。
+     * @throws IllegalArgumentException 如果 headers 为 null 或者包含 null 键的 header。
      */
     public static int writeTo(DataOutputStream out,
                               int offsetDelta,
@@ -167,15 +177,17 @@ public class DefaultRecord implements Record {
                               ByteBuffer key,
                               ByteBuffer value,
                               Header[] headers) throws IOException {
+        // lyj 计算数据大小
         int sizeInBytes = sizeOfBodyInBytes(offsetDelta, timestampDelta, key, value, headers);
+        // lyj 1.将数据大小写入到out中
         ByteUtils.writeVarint(sizeInBytes, out);
-
+        // lyj 2.将属性写入到out中 (这个目前是没有使用过的)
         byte attributes = 0; // there are no used record attributes at the moment
         out.write(attributes);
-
+        // lyj 3.将时间戳和偏移量写入out中
         ByteUtils.writeVarlong(timestampDelta, out);
         ByteUtils.writeVarint(offsetDelta, out);
-
+        // lyj 4.写入key长度以及key内容 如果key为null则写入-1
         if (key == null) {
             ByteUtils.writeVarint(-1, out);
         } else {
@@ -183,7 +195,7 @@ public class DefaultRecord implements Record {
             ByteUtils.writeVarint(keySize, out);
             Utils.writeTo(out, key, keySize);
         }
-
+        // lyj 5.写入value长度以及value内容 如果value为null则写入-1
         if (value == null) {
             ByteUtils.writeVarint(-1, out);
         } else {
@@ -194,7 +206,7 @@ public class DefaultRecord implements Record {
 
         if (headers == null)
             throw new IllegalArgumentException("Headers cannot be null");
-
+        // lyj 6.开始写入headers
         ByteUtils.writeVarint(headers.length, out);
 
         for (Header header : headers) {
@@ -214,7 +226,7 @@ public class DefaultRecord implements Record {
                 out.write(headerValue);
             }
         }
-
+        // lyj sizeInBytes是2-6的字节大小 第一步还写了一个整体大小所以这里还需要加上ByteUtils.sizeOfVarint(sizeInBytes)
         return ByteUtils.sizeOfVarint(sizeInBytes) + sizeInBytes;
     }
 
@@ -560,21 +572,36 @@ public class DefaultRecord implements Record {
         return bodySize + ByteUtils.sizeOfVarint(bodySize);
     }
 
+    /**
+     * 计算消息体的大小（以字节为单位）。
+     * 该方法通过计算给定的偏移量、时间戳、键、值和头信息的大小来确定消息体的总大小。
+     *
+     * @param offsetDelta 偏移量的增量。表示当前消息偏移量与前一个消息偏移量的差值。
+     * @param timestampDelta 时间戳的增量。表示当前消息时间戳与前一个消息时间戳的差值。
+     * @param key 消息的键，如果为空，则键大小为-1。
+     * @param value 消息的值，如果为空，则值大小为-1。
+     * @param headers 消息的头信息数组。
+     * @return 消息体的总大小（以字节为单位）。
+     */
     private static int sizeOfBodyInBytes(int offsetDelta,
                                          long timestampDelta,
                                          ByteBuffer key,
                                          ByteBuffer value,
                                          Header[] headers) {
+        // 计算键和值的大小，如果为空，则大小为-1。
         int keySize = key == null ? -1 : key.remaining();
         int valueSize = value == null ? -1 : value.remaining();
+        // 调用另一个sizeOfBodyInBytes方法，传入计算后的键值大小和头信息，计算消息体总大小。
         return sizeOfBodyInBytes(offsetDelta, timestampDelta, keySize, valueSize, headers);
     }
+
 
     public static int sizeOfBodyInBytes(int offsetDelta,
                                         long timestampDelta,
                                         int keySize,
                                         int valueSize,
                                         Header[] headers) {
+        // lyj 这个是attributes的size 由于没有使用所以一直是一个字节byte类型
         int size = 1; // always one byte for attributes
         size += ByteUtils.sizeOfVarint(offsetDelta);
         size += ByteUtils.sizeOfVarlong(timestampDelta);

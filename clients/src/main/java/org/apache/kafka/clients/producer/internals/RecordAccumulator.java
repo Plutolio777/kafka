@@ -251,24 +251,24 @@ public class RecordAccumulator {
     }
 
     /**
-     * Add a record to the accumulator, return the append result
+     * 向累加器中添加一条message，返回添加的结果。{@link RecordAppendResult}
      * <p>
-     * The append result will contain the future metadata, and flag for whether the appended batch is full or a new batch is created
+     * 追加结果将包含未来元数据，以及指示所追加的批次是否已满或是否创建了新批次的标志。
      * <p>
      *
-     * @param topic The topic to which this record is being sent
-     * @param partition The partition to which this record is being sent or RecordMetadata.UNKNOWN_PARTITION
-     *                  if any partition could be used
-     * @param timestamp The timestamp of the record
-     * @param key The key for the record
-     * @param value The value for the record
-     * @param headers the Headers for the record
-     * @param callbacks The callbacks to execute
-     * @param maxTimeToBlock The maximum time in milliseconds to block for buffer memory to be available
-     * @param abortOnNewBatch A boolean that indicates returning before a new batch is created and
-     *                        running the partitioner's onNewBatch method before trying to append again
-     * @param nowMs The current time, in milliseconds
-     * @param cluster The cluster metadata
+     * @param topic           记录要发送的主题
+     * @param partition       记录要发送的分区，或为 {@link RecordMetadata#UNKNOWN_PARTITION}表示任何分区都可使用
+     * @param timestamp       记录的时间戳
+     * @param key             记录的键
+     * @param value           记录的值
+     * @param headers         记录的头部信息
+     * @param callbacks       执行的回调 用户传入的回调函数包装可以查看 {@link org.apache.kafka.clients.producer.KafkaProducer#}
+     * @param maxTimeToBlock  剩余的block时间
+     * @param abortOnNewBatch 一个布尔值，指示是否在创建新批次并运行分区器的onNewBatch方法之前返回并再次尝试追加
+     * @param nowMs           当前时间，以毫秒为单位
+     * @param cluster         集群元数据
+     * @return RecordAppendResult 追加结果，包含未来元数据和追加批次的状态信息
+     * @throws InterruptedException 如果执行过程中线程被中断
      */
     public RecordAppendResult append(String topic,
                                      int partition,
@@ -281,6 +281,9 @@ public class RecordAccumulator {
                                      boolean abortOnNewBatch,
                                      long nowMs,
                                      Cluster cluster) throws InterruptedException {
+
+        // lyj 获取topic info 如果没有则创建一个
+        // lyj topicInfoMap 是topic str -> topic info的一个映射缓存 累加器需要保证线程安全所以使用的 CopyOnWriteMap
         TopicInfo topicInfo = topicInfoMap.computeIfAbsent(topic, k -> new TopicInfo(logContext, k, batchSize));
 
         // We keep track of the number of appending thread to make sure we do not miss batches in
@@ -298,23 +301,35 @@ public class RecordAccumulator {
                 final BuiltInPartitioner.StickyPartitionInfo partitionInfo;
                 final int effectivePartition;
                 if (partition == RecordMetadata.UNKNOWN_PARTITION) {
+                    // lyj 这里是累加器采用粘性分区机制来选择分区
+                    // lyj 每一个topic info都有一个 builtinPartitioner 用于累加器中的分区选择
+                    // lyj 累加器的粘性分区机制旨在用户没有显示指定partition或者key时会使用累加器的粘性分区机制
+                    // lyj partitioner中有一个 AtomicReference<BuiltInPartitioner.StickyPartitionInfo> 他是相当于partition的缓存
+                    // lyj 通过 AtomicReference.get() 可以获取StickyPartitionInfo 调用的是stickyPartitionInfo.get()获取partition
+                    // lyj 1.
                     partitionInfo = topicInfo.builtInPartitioner.peekCurrentPartitionInfo(cluster);
                     effectivePartition = partitionInfo.partition();
                 } else {
+                    // lyj 不适用粘性分区
                     partitionInfo = null;
                     effectivePartition = partition;
                 }
 
+                // lyj 这里会在append回调里面更改选择的分区 也是为了告诉上层调用者消息最终发到哪个partition里面去了
                 // Now that we know the effective partition, let the caller know.
                 setPartition(callbacks, effectivePartition);
 
                 // check if we have an in-progress batch
+                // lyj 根据分区到topicInfo里面把双端队列取出来 这个deque就是用来保存ProducerBatch，如果没有则创建一个新的deque
                 Deque<ProducerBatch> dq = topicInfo.batches.computeIfAbsent(effectivePartition, k -> new ArrayDeque<>());
+                // lyj 进入消息的提交阶段，此时会锁定deque 禁止其他线程同时操作这一个deque
+                // lyj 这里直接锁了 有没有可以优化的地方 比如其他线程在提交message发现这个partition锁了则使用其他的partition？
                 synchronized (dq) {
+                    // lyj 防止其他现场调用了 peekCurrentPartitionInfo 方法更新了partition info
                     // After taking the lock, validate that the partition hasn't changed and retry.
                     if (partitionChanged(topic, topicInfo, partitionInfo, dq, nowMs, cluster))
                         continue;
-
+                    // lyj 尝试追加消息
                     RecordAppendResult appendResult = tryAppend(timestamp, key, value, headers, callbacks, dq, nowMs);
                     if (appendResult != null) {
                         // If queue has incomplete batches we disable switch (see comments in updatePartitionInfo).
@@ -323,7 +338,7 @@ public class RecordAccumulator {
                         return appendResult;
                     }
                 }
-
+                // lyj 如果传入 abortOnNewBatch 的值是true 则在batch已满时 会尝试交给调用方来重新选择batch 否则将由采用粘性分区机制来选择batch
                 // we don't have an in-progress record batch try to allocate a new batch
                 if (abortOnNewBatch) {
                     // Return a result that will cause another call to append.
@@ -423,31 +438,48 @@ public class RecordAccumulator {
         return last == null || last.isFull();
     }
 
-     /**
-     *  Try to append to a ProducerBatch.
+    /**
+     * 尝试将记录追加到 ProducerBatch 中。
+     * 如果 ProducerBatch 已满，则返回 null，并创建一个新的批次。同时，我们关闭当前批次以释放资源，如压缩缓冲区。
+     * 批次将在以下情况中完全关闭（无论哪个先发生）：发送前、过期或生产者关闭时。
      *
-     *  If it is full, we return null and a new batch is created. We also close the batch for record appends to free up
-     *  resources like compression buffers. The batch will be fully closed (ie. the record batch headers will be written
-     *  and memory records built) in one of the following cases (whichever comes first): right before send,
-     *  if it is expired, or when the producer is closed.
+     * @param timestamp 记录的时间戳。
+     * @param key 记录的键。
+     * @param value 记录的值。
+     * @param headers 记录的头部信息。
+     * @param callback 在记录追加完成后调用的回调函数。
+     * @param deque 存储 ProducerBatch 的双端队列。
+     * @param nowMs 当前时间（毫秒）。
+     * @return 如果成功追加返回 RecordAppendResult，如果批次已满返回 null。
+     * @throws KafkaException 如果生产者在发送过程中关闭。
      */
     private RecordAppendResult tryAppend(long timestamp, byte[] key, byte[] value, Header[] headers,
                                          Callback callback, Deque<ProducerBatch> deque, long nowMs) {
+        // lyj 检查生产者是否在发送过程中被关闭
         if (closed)
             throw new KafkaException("Producer closed while send in progress");
+
+        // lyj 获取最后一个batch
         ProducerBatch last = deque.peekLast();
         if (last != null) {
+            // lyj 记录追加前的批次大小
             int initialBytes = last.estimatedSizeInBytes();
+            // lyj 调用RecordBatch的tryAppend方法尝试追加记录到批次中
             FutureRecordMetadata future = last.tryAppend(timestamp, key, value, headers, callback, nowMs);
             if (future == null) {
+                // 如果追加失败（批次已满），则关闭批次以释放资源
                 last.closeForRecordAppends();
             } else {
+                // 计算追加记录后的批次大小变化
                 int appendedBytes = last.estimatedSizeInBytes() - initialBytes;
+                // 返回追加结果
                 return new RecordAppendResult(future, deque.size() > 1 || last.isFull(), false, false, appendedBytes);
             }
         }
+        // 如果没有可用的批次或批次已满，返回 null
         return null;
     }
+
 
     private boolean isMuted(TopicPartition tp) {
         return muted.contains(tp);
@@ -1212,9 +1244,13 @@ public class RecordAccumulator {
 
     /**
      * Per topic info.
+     * 这个类是用来维护topic -> partition -> producer batch 的映射关系
+     * 累加器添加message就是把message添加到 ProducerBatch 然后再送到Deque双端链表中
      */
     private static class TopicInfo {
+
         public final ConcurrentMap<Integer /*partition*/, Deque<ProducerBatch>> batches = new CopyOnWriteMap<>();
+        // lyj 累加器中使用的分区器 BuiltInPartitioner
         public final BuiltInPartitioner builtInPartitioner;
 
         public TopicInfo(LogContext logContext, String topic, int stickyBatchSize) {

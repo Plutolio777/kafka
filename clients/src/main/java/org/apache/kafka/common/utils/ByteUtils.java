@@ -291,33 +291,38 @@ public final class ByteUtils {
     }
 
     /**
-     * Write the given integer following the variable-length unsigned encoding from
-     * <a href="http://code.google.com/apis/protocolbuffers/docs/encoding.html"> Google Protocol Buffers</a>
-     * into the buffer.
+     * 将给定的整数按照 Google Protocol Buffers 的变长无符号编码规则写入缓冲区。
+     * 此编码方式用于高效存储小到中等范围的整数，根据数值大小占用1到10个字节。
      *
-     * @param value The value to write
-     * @param out The output to write to
+     * @param value 要写入的值。这是一个有符号整数，但会被当作无符号值进行处理。
+     * @param out 写入的目标，实现 DataOutput 接口。
+     * @throws IOException 如果在写入过程中发生 I/O 错误。
      */
     public static void writeUnsignedVarint(int value, DataOutput out) throws IOException {
+        // 当 value 的最高位为 1 时，继续循环，将其转换为字节并写入输出流
         while ((value & 0xffffff80) != 0L) {
-            byte b = (byte) ((value & 0x7f) | 0x80);
-            out.writeByte(b);
-            value >>>= 7;
+            byte b = (byte) ((value & 0x7f) | 0x80); // 将 value 的低 7 位与 0x80 相或，标志位为 1
+            out.writeByte(b); // 写入字节
+            value >>>= 7; // value 右移 7 位，准备处理下一个字节
         }
+        // 当 value 的最高位为 0 时，表示变长编码完成，将剩余的 value 写入输出流
         out.writeByte((byte) value);
     }
 
+
     /**
-     * Write the given integer following the variable-length zig-zag encoding from
-     * <a href="http://code.google.com/apis/protocolbuffers/docs/encoding.html"> Google Protocol Buffers</a>
-     * into the output.
+     * 将给定的整数使用变长zig-zag编码写入输出中。这种编码方式来自
+     * <a href="http://code.google.com/apis/protocolbuffers/docs/encoding.html"> Google Protocol Buffers</a>。
      *
-     * @param value The value to write
-     * @param out The output to write to
+     * @param value 需要写入的整数值。
+     * @param out 写入的目标 DataOutput。
+     * @throws IOException 如果在写入过程中发生IO异常。
      */
     public static void writeVarint(int value, DataOutput out) throws IOException {
+        // lyj 对整数进行zig-zag编码并写入为无符号变长整数
         writeUnsignedVarint((value << 1) ^ (value >> 31), out);
     }
+
 
     /**
      * Write the given integer following the variable-length zig-zag encoding from
@@ -332,21 +337,28 @@ public final class ByteUtils {
     }
 
     /**
-     * Write the given integer following the variable-length zig-zag encoding from
-     * <a href="http://code.google.com/apis/protocolbuffers/docs/encoding.html"> Google Protocol Buffers</a>
-     * into the output.
+     * 将给定的整数按照变量长度的zig-zag编码从 Google Protocol Buffers 中描述的方式写入输出。
+     * 此编码方式适用于高效地序列化变长整数，特别是在数据中有许多小整数但偶尔出现大整数的情况下。
      *
-     * @param value The value to write
-     * @param out The output to write to
+     * @param value 要写入的值
+     * @param out 要写入的数据输出
+     * @throws IOException 如果在写入过程中发生IO异常
      */
     public static void writeVarlong(long value, DataOutput out) throws IOException {
+        // 使用zig-zag编码转换值，以确保正数和负数可以使用相同的基本模式进行编码
         long v = (value << 1) ^ (value >> 63);
+
+        // 循环将值按照变长编码格式写入输出，直到整个值都被编码完成
         while ((v & 0xffffffffffffff80L) != 0L) {
+            // 将每7位作为一个字节进行编码，并设置最高位为1，表示还有更多的字节即将跟随
             out.writeByte(((int) v & 0x7f) | 0x80);
-            v >>>= 7;
+            v >>>= 7; // 无符号右移7位，准备处理下一个7位组
         }
+
+        // 编码最后的字节，最高位为0，表示这是最后一个字节
         out.writeByte((byte) v);
     }
+
 
     /**
      * Write the given integer following the variable-length zig-zag encoding from
