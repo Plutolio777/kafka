@@ -199,18 +199,19 @@ class KafkaServer(
   override def startup(): Unit = {
     try {
       info("starting")
-
+      // mark 如果kafka 正在关闭，则抛出异常
       if (isShuttingDown.get)
         throw new IllegalStateException("Kafka server is still shutting down, cannot re-start!")
-
+      // mark 如果kafka 已经启动，则直接返回不处理任何
       if (startupComplete.get)
         return
-
+      // mark 设置 kafka 状态为已经启动
       val canStartup = isStartingUp.compareAndSet(false, true)
       if (canStartup) {
         _brokerState = BrokerState.STARTING
 
         /* setup zookeeper */
+        // mark 初始化zookeeper client 创建一些必要的路径
         initZkClient(time)
         configRepository = new ZkConfigRepository(new AdminZkClient(zkClient))
 
