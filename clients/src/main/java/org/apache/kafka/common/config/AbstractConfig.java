@@ -386,11 +386,25 @@ public class AbstractConfig {
         }
     }
 
+    /**
+     * 根据给定的类配置创建并返回一个实例。
+     * <p>
+     * 这个方法支持通过类名字符串或class对象来创建实例。如果提供的类名字符串能够找到对应的类，
+     * 则会创建该类的实例。创建的实例如果实现了Configurable接口，还会被传入的配置对(configPairs)进行配置。
+     * </p>
+     *
+     * @param klass 类名字符串或类对象，用于创建实例。
+     * @param t 预期返回实例的类型。
+     * @param configPairs 配置参数对，如果创建的实例实现了Configurable接口，则会使用这些配置进行配置。
+     * @return 配置好的实例，如果根据klass无法创建实例或出现其他异常，则返回null。
+     * @throws KafkaException 如果根据提供的klass无法找到对应的类，或者创建的实例不是预期类型，或者配置过程中发生异常。
+     */
     private <T> T getConfiguredInstance(Object klass, Class<T> t, Map<String, Object> configPairs) {
         if (klass == null)
             return null;
         Object o;
 
+        // 根据klass的类型来创建实例
         if (klass instanceof String) {
             try {
                 o = Utils.newInstance((String) klass, t);
@@ -401,17 +415,21 @@ public class AbstractConfig {
             o = Utils.newInstance((Class<?>) klass);
         } else
             throw new KafkaException("Unexpected element of type " + klass.getClass().getName() + ", expected String or Class");
+
+        // 检查创建的实例是否为预期类型，并尝试对其进行配置
         try {
             if (!t.isInstance(o))
                 throw new KafkaException(klass + " is not an instance of " + t.getName());
             if (o instanceof Configurable)
                 ((Configurable) o).configure(configPairs);
         } catch (Exception e) {
+            // 如果在配置过程中出现异常，尝试关闭已构造的实例（如果它实现了AutoCloseable）
             maybeClose(o, "AutoCloseable object constructed and configured during failed call to getConfiguredInstance");
             throw e;
         }
         return t.cast(o);
     }
+
 
     /**
      * Get a configured instance of the give class specified by the given configuration key. If the object implements

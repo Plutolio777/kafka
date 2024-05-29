@@ -48,21 +48,36 @@ public final class ClientUtils {
         return parseAndValidateAddresses(urls, ClientDnsLookup.forConfig(clientDnsLookupConfig));
     }
 
+    /**
+     * 解析并验证给定URL列表中的地址信息。
+     *
+     * @param urls 包含服务器地址信息的字符串列表，每个字符串应为“主机:端口”的格式。
+     * @param clientDnsLookup 客户端DNS查找策略，决定如何处理主机名的DNS解析。
+     * @return 一个包含有效地址信息的InetSocketAddress列表。
+     * @throws ConfigException 如果提供的URL无法解析成有效的地址或端口，或者列表为空。
+     */
     public static List<InetSocketAddress> parseAndValidateAddresses(List<String> urls, ClientDnsLookup clientDnsLookup) {
         List<InetSocketAddress> addresses = new ArrayList<>();
+        // mark 遍历所有的url
         for (String url : urls) {
+            // 跳过空或空字符串的URL
             if (url != null && !url.isEmpty()) {
                 try {
+                    // 解析URL中的主机和端口
                     String host = getHost(url);
                     Integer port = getPort(url);
+                    // 如果无法解析出主机或端口，则抛出配置异常
                     if (host == null || port == null)
                         throw new ConfigException("Invalid url in " + CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG + ": " + url);
 
+                    // 根据DNS查找策略处理主机名解析
                     if (clientDnsLookup == ClientDnsLookup.RESOLVE_CANONICAL_BOOTSTRAP_SERVERS_ONLY) {
                         InetAddress[] inetAddresses = InetAddress.getAllByName(host);
                         for (InetAddress inetAddress : inetAddresses) {
+                            // 尝试将解析的主机名转换为规范主机名
                             String resolvedCanonicalName = inetAddress.getCanonicalHostName();
                             InetSocketAddress address = new InetSocketAddress(resolvedCanonicalName, port);
+                            // 如果地址无法解析，则记录警告；否则，添加到结果列表中
                             if (address.isUnresolved()) {
                                 log.warn("Couldn't resolve server {} from {} as DNS resolution of the canonical hostname {} failed for {}", url, CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, resolvedCanonicalName, host);
                             } else {
@@ -70,7 +85,9 @@ public final class ClientUtils {
                             }
                         }
                     } else {
+                        // 直接解析主机名，不考虑规范主机名
                         InetSocketAddress address = new InetSocketAddress(host, port);
+                        // 如果地址无法解析，则记录警告；否则，添加到结果列表中
                         if (address.isUnresolved()) {
                             log.warn("Couldn't resolve server {} from {} as DNS resolution failed for {}", url, CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, host);
                         } else {
@@ -79,12 +96,15 @@ public final class ClientUtils {
                     }
 
                 } catch (IllegalArgumentException e) {
+                    // 如果端口号无效，则抛出配置异常
                     throw new ConfigException("Invalid port in " + CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG + ": " + url);
                 } catch (UnknownHostException e) {
+                    // 如果主机名未知，则抛出配置异常
                     throw new ConfigException("Unknown host in " + CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG + ": " + url);
                 }
             }
         }
+        // 如果最终没有解析出任何有效地址，则抛出配置异常
         if (addresses.isEmpty())
             throw new ConfigException("No resolvable bootstrap urls given in " + CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG);
         return addresses;

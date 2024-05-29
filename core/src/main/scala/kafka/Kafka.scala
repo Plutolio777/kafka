@@ -39,16 +39,16 @@ object Kafka extends Logging {
     // but would not be mandatory if --version is specified
     // This is a bit of an ugly crutch till we get a chance to rework the entire command line parsing
     optionParser.accepts("version", "Print version information and exit.")
-
+    // mark 如果args为空的话，则打印帮助信息
     if (args.isEmpty || args.contains("--help")) {
       CommandLineUtils.printUsageAndDie(optionParser,
         "USAGE: java [options] %s server.properties [--override property=value]*".format(this.getClass.getCanonicalName.split('$').head))
     }
-
+    // mark 如果args为--version话，则打印帮助信息
     if (args.contains("--version")) {
       CommandLineUtils.printVersionAndDie()
     }
-
+    // mark 解析xxx.properties配置文件
     val props = Utils.loadProps(args(0))
 
     if (args.length > 1) {
@@ -69,9 +69,19 @@ object Kafka extends Logging {
   private def enableApiForwarding(config: KafkaConfig) =
     config.migrationEnabled && config.interBrokerProtocolVersion.isApiForwardingEnabled
 
+  /**
+   * 根据提供的属性构建Kafka服务器实例。
+   *
+   * @param props 包含Kafka服务器配置的属性对象。
+   * @return 根据配置要求返回一个KafkaServer或者KafkaRaftServer实例。
+   */
   private def buildServer(props: Properties): Server = {
-    val config = KafkaConfig.fromProps(props, false)
+    // mark Properties -> KafkaConfig对象
+    val config = KafkaConfig.fromProps(props, doLog = false)
+
+    // mark 根据配置决定创建的服务器类型
     if (config.requiresZookeeper) {
+      // mark 如果配置表明需要ZooKeeper，则创建传统的KafkaServer
       new KafkaServer(
         config,
         Time.SYSTEM,
@@ -79,6 +89,7 @@ object Kafka extends Logging {
         enableForwarding = enableApiForwarding(config)
       )
     } else {
+      // mark 如果不需要ZooKeeper，则创建使用Raft协议的KafkaRaftServer
       new KafkaRaftServer(
         config,
         Time.SYSTEM,
@@ -89,6 +100,7 @@ object Kafka extends Logging {
 
   def main(args: Array[String]): Unit = {
     try {
+      // mark 1.从命令行参数中获取配置
       val serverProps = getPropsFromArgs(args)
       val server = buildServer(serverProps)
 

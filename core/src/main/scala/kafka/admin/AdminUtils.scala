@@ -122,26 +122,54 @@ object AdminUtils extends Logging {
     }
   }
 
+  /**
+   * kafka副本分配逻辑（不考虑机架）
+   * 将分区副本分配给代理服务器，不考虑机架感知。
+   *
+   * @param nPartitions 分区的数量
+   * @param replicationFactor 副本因子
+   * @param brokerList kafka节点列表
+   * @param fixedStartIndex 固定开始索引，如果大于等于0，则从该索引开始分配第一个分区副本；否则，随机选择开始索引。 默认值为-1
+   * @param startPartitionId 开始分配的分区ID，通常用于恢复操作。默认值为-1
+   * @return 返回一个映射，键是分区ID，值是该分区的所有副本所在的代理服务器ID序列。
+   */
   private def assignReplicasToBrokersRackUnaware(nPartitions: Int,
                                                  replicationFactor: Int,
                                                  brokerList: Iterable[Int],
                                                  fixedStartIndex: Int,
                                                  startPartitionId: Int): Map[Int, Seq[Int]] = {
+    // 创建一个可变的映射，用于存储分区ID到其副本列表的映射
     val ret = mutable.Map[Int, Seq[Int]]()
-    val brokerArray = brokerList.toArray
-    val startIndex = if (fixedStartIndex >= 0) fixedStartIndex else rand.nextInt(brokerArray.length)
-    var currentPartitionId = math.max(0, startPartitionId)
-    var nextReplicaShift = if (fixedStartIndex >= 0) fixedStartIndex else rand.nextInt(brokerArray.length)
+    // 将代理服务器列表转换为数组以方便操作
+    val brokerArray = brokerList.toArray // [0,1,2,3]
+
+    // 根据是否指定了固定开始索引，确定实际的开始索引
+    val startIndex = if (fixedStartIndex >= 0) fixedStartIndex else rand.nextInt(brokerArray.length) // 4
+    // 初始化当前分区ID，确保它不会小于0
+    var currentPartitionId = math.max(0, startPartitionId) // 0
+    // 根据是否指定了固定开始索引，确定下一个副本的偏移量
+    var nextReplicaShift = if (fixedStartIndex >= 0) fixedStartIndex else rand.nextInt(brokerArray.length) // 3
+
+    // 为每个分区分配副本
     for (_ <- 0 until nPartitions) {
+      // 当当前分区ID是代理服务器列表长度的倍数时，增加下一个副本的偏移量
       if (currentPartitionId > 0 && (currentPartitionId % brokerArray.length == 0))
         nextReplicaShift += 1
+
+      // 确定第一个副本的索引位置
       val firstReplicaIndex = (currentPartitionId + startIndex) % brokerArray.length
+      // 使用可变数组来存储分区的副本
       val replicaBuffer = mutable.ArrayBuffer(brokerArray(firstReplicaIndex))
+      // 为分区分配剩余的副本
       for (j <- 0 until replicationFactor - 1)
         replicaBuffer += brokerArray(replicaIndex(firstReplicaIndex, nextReplicaShift, j, brokerArray.length))
+
+      // 将分配好的副本列表添加到结果映射中
       ret.put(currentPartitionId, replicaBuffer)
+      // 移动到下一个分区
       currentPartitionId += 1
     }
+    // 返回分配结果
     ret
   }
 

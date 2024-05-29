@@ -344,13 +344,16 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                   ProducerInterceptors<K, V> interceptors,
                   Time time) {
         try {
+            // mark 对里面维护了一个hashmap
             this.producerConfig = config;
+            // mark 这个time是kafka自定义的SystemTime对象 定义了一些与系统时间相关的方法 比如获取时间戳， 睡眠，定时任务的实现
             this.time = time;
 
             String transactionalId = config.getString(ProducerConfig.TRANSACTIONAL_ID_CONFIG);
 
             this.clientId = config.getString(ProducerConfig.CLIENT_ID_CONFIG);
 
+            // mark 初始化日志相关的配置 主要是为了统一打印日志的前缀
             LogContext logContext;
             if (transactionalId == null)
                 logContext = new LogContext(String.format("[Producer clientId=%s] ", clientId));
@@ -359,6 +362,8 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             log = logContext.logger(KafkaProducer.class);
             log.trace("Starting the Kafka producer");
 
+            // mark 初始化监控指标配置 标签client-id配置
+            // mark 关于生产者的监控指标可以看官网文档：https://kafka.apache.org/documentation/#producer_monitoring
             Map<String, String> metricTags = Collections.singletonMap("client-id", clientId);
             MetricConfig metricConfig = new MetricConfig().samples(config.getInt(ProducerConfig.METRICS_NUM_SAMPLES_CONFIG))
                     .timeWindow(config.getLong(ProducerConfig.METRICS_SAMPLE_WINDOW_MS_CONFIG), TimeUnit.MILLISECONDS)
@@ -369,13 +374,18 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     config.originalsWithPrefix(CommonClientConfigs.METRICS_CONTEXT_PREFIX));
             this.metrics = new Metrics(metricConfig, reporters, time, metricsContext);
             this.producerMetrics = new KafkaProducerMetrics(metrics);
+            // mark 从配置中获取partitioner.class用于生成分区器，AbstractConfig中的getConfiguredInstance用于从配置获取全限定类名直接生成实例 属于一步到位
             this.partitioner = config.getConfiguredInstance(
                     ProducerConfig.PARTITIONER_CLASS_CONFIG,
                     Partitioner.class,
                     Collections.singletonMap(ProducerConfig.CLIENT_ID_CONFIG, clientId));
+            // mark 打印警告 如果使用 DefaultPartitioner 或者 UniformStickyPartitioner 这两个分区器会警告 官方不推荐使用
             warnIfPartitionerDeprecated();
+            // mark partitioner.ignore.keys 这个配置是kafka是否使用key来进行分区
             this.partitionerIgnoreKeys = config.getBoolean(ProducerConfig.PARTITIONER_IGNORE_KEYS_CONFIG);
+            // mark retry.backoff.ms生产者发送消息失败后再次发送需要等待的时间
             long retryBackoffMs = config.getLong(ProducerConfig.RETRY_BACKOFF_MS_CONFIG);
+            // mark 初始化key的序列化器 可通过key.serializer指定
             if (keySerializer == null) {
                 this.keySerializer = config.getConfiguredInstance(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
                                                                                          Serializer.class);
@@ -384,6 +394,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 config.ignore(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG);
                 this.keySerializer = keySerializer;
             }
+            // mark 初始化value的序列化器 可通过value.serializer指定
             if (valueSerializer == null) {
                 this.valueSerializer = config.getConfiguredInstance(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
                                                                                            Serializer.class);
@@ -392,7 +403,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 config.ignore(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG);
                 this.valueSerializer = valueSerializer;
             }
-
+            // mark 初始化value的序列化器 可通过interceptor.classes指定
             List<ProducerInterceptor<K, V>> interceptorList = (List) config.getConfiguredInstances(
                     ProducerConfig.INTERCEPTOR_CLASSES_CONFIG,
                     ProducerInterceptor.class,
@@ -401,18 +412,30 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 this.interceptors = interceptors;
             else
                 this.interceptors = new ProducerInterceptors<>(interceptorList);
+            // mark 这个监听器是用于元数据更新时候的通知 ，这里是注册监听器的只有这个资源类型实现了ClusterResourceListener接口才会被添加到监听器里面
+            // mark interceptorList 是监听器 也就是说可以通过实现 ClusterResourceListener 两个接口来实现当集群元数据变更时进行回调
+            // mark 仅限于这几类对象 keySerializer, valueSerializer, interceptorList, reporters
+            // mark ClusterResourceListener中的onUpdate方法为具体的回调方法
             ClusterResourceListeners clusterResourceListeners = configureClusterResourceListeners(keySerializer,
                     valueSerializer, interceptorList, reporters);
+            // mark max.request.size 用于指定生产者能够发送的最大请求大小（以字节为单位）
             this.maxRequestSize = config.getInt(ProducerConfig.MAX_REQUEST_SIZE_CONFIG);
+            // mark buffer.memory 用于指定生产者用来缓冲等待发送到服务器的消息的总内存大小（以字节为单位）
             this.totalMemorySize = config.getLong(ProducerConfig.BUFFER_MEMORY_CONFIG);
+            // mark compression.type 用于指定生产者在发送消息时使用的压缩类型。(全限定类名)
             this.compressionType = CompressionType.forName(config.getString(ProducerConfig.COMPRESSION_TYPE_CONFIG));
-
+            // mark max.block.ms 配置控制KafkaProducer's send()、partitionsFor()、initTransactions()、sendOffsetsToTransaction()和commitTransaction() 将阻塞的最长时间。
+            // mark kafka虽然是异步发送 但是方法调用期间还是需要阻塞的
             this.maxBlockTimeMs = config.getLong(ProducerConfig.MAX_BLOCK_MS_CONFIG);
+            // mark delivery.timeout.ms send()调用返回后报告成功或失败的时间上限。
             int deliveryTimeoutMs = configureDeliveryTimeout(config, log);
-
+            // mark 维护节点api版本，以便在NetworkClient（信息的来源）之外进行访问。该模式类似于对主题元数据使用元数据。注：此类仅用于卡夫卡内部使用。
             this.apiVersions = new ApiVersions();
+            // mark TransactionManager对象的初始化
             this.transactionManager = configureTransactionState(config, logContext);
+
             // There is no need to do work required for adaptive partitioning, if we use a custom partitioner.
+            // mark 这个是为了配置累加器中的分区逻辑， 如果在创建生产者的时候已经指定了分区器则在不会使用默认的分区逻辑
             boolean enableAdaptivePartitioning = partitioner == null &&
                 config.getBoolean(ProducerConfig.PARTITIONER_ADPATIVE_PARTITIONING_ENABLE_CONFIG);
             RecordAccumulator.PartitionerConfig partitionerConfig = new RecordAccumulator.PartitionerConfig(
@@ -421,7 +444,9 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             );
             // As per Kafka producer configuration documentation batch.size may be set to 0 to explicitly disable
             // batching which in practice actually means using a batch size of 1.
+            // mark kafka批处理缓存大小 最小唯一 因为有一个预留位大小为1
             int batchSize = Math.max(1, config.getInt(ProducerConfig.BATCH_SIZE_CONFIG));
+            // mark 累加器初始化
             this.accumulator = new RecordAccumulator(logContext,
                     batchSize,
                     this.compressionType,
@@ -435,7 +460,8 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     apiVersions,
                     transactionManager,
                     new BufferPool(this.totalMemorySize, batchSize, metrics, time, PRODUCER_METRIC_GROUP_NAME));
-
+            // mark 解析集群地址 bootstrap.servers
+            // mark client.dns.lookup 用于指定Kafka客户端如何进行DNS解析
             List<InetSocketAddress> addresses = ClientUtils.parseAndValidateAddresses(
                     config.getList(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG),
                     config.getString(ProducerConfig.CLIENT_DNS_LOOKUP_CONFIG));
