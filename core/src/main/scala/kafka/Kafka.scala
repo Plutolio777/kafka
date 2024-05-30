@@ -62,6 +62,7 @@ object Kafka extends Logging {
       // mark 只支持 key=value格式的参数 并增加到props中 启动命令行中的配置优先级更高！！！
       props ++= CommandLineUtils.parseKeyValueArgs(options.valuesOf(overrideOpt).asScala)
     }
+    // scala 没有return??? 真抽象//
     props
   }
 
@@ -102,11 +103,13 @@ object Kafka extends Logging {
 
   def main(args: Array[String]): Unit = {
     try {
-      // mark 1.从命令行参数中获取配置
+      // mark 1.从配置文件中中加载配置 2.从命令行中加载配置
       val serverProps = getPropsFromArgs(args)
+      // mark 构建BrokerServer
       val server = buildServer(serverProps)
 
       try {
+        // mark 针对操作系统和JDK发行版做一些适配
         if (!OperatingSystem.IS_WINDOWS && !Java.isIbmJdk)
           new LoggingSignalHandler().register()
       } catch {
@@ -114,7 +117,7 @@ object Kafka extends Logging {
           warn("Failed to register optional signal handler that logs a message when the process is terminated " +
             s"by a signal. Reason for registration failure is: $e", e)
       }
-
+      // mark 添加java进程退出的hook，这里检测到服务退出的时候会调用 server.shutdown()
       // attach shutdown handler to catch terminating signals as well as normal termination
       Exit.addShutdownHook("kafka-shutdown-hook", {
         try server.shutdown()
@@ -126,6 +129,7 @@ object Kafka extends Logging {
         }
       })
 
+      // mark 服务启动
       try server.startup()
       catch {
         case e: Throwable =>
@@ -133,7 +137,7 @@ object Kafka extends Logging {
           fatal("Exiting Kafka due to fatal exception during startup.", e)
           Exit.exit(1)
       }
-
+      // mark 等待服务关闭
       server.awaitShutdown()
     }
     catch {
