@@ -670,14 +670,16 @@ public final class Utils {
     }
 
     /**
-     * Read a properties file from the given path
-     * @param filename The path of the file to read
-     * @param onlyIncludeKeys When non-null, only return values associated with these keys and ignore all others
-     * @return the loaded properties
+     * mark 从properties文件中加载配置的流程
+     * @param filename 文件的路径
+     * @param onlyIncludeKeys 当非空时，仅返回与这些键相关的值，并忽略其他所有键
+     * @return 加载的属性
+     * @throws IOException 如果读取文件发生错误
      */
     public static Properties loadProps(String filename, List<String> onlyIncludeKeys) throws IOException {
         Properties props = new Properties();
 
+        // mark 加载指定路径的属性文件到内存中的Properties对象
         if (filename != null) {
             try (InputStream propStream = Files.newInputStream(Paths.get(filename))) {
                 props.load(propStream);
@@ -686,8 +688,11 @@ public final class Utils {
             System.out.println("Did not load any properties since the property file is not specified");
         }
 
+        // mark 如果onlyIncludeKeys为null或空，则直接返回所有加载的属性(启动流程中这个List为空)
         if (onlyIncludeKeys == null || onlyIncludeKeys.isEmpty())
             return props;
+
+        // mark 只选择onlyIncludeKeys中存在的key
         Properties requestedProps = new Properties();
         onlyIncludeKeys.forEach(key -> {
             String value = props.getProperty(key);
@@ -696,6 +701,7 @@ public final class Utils {
         });
         return requestedProps;
     }
+
 
     /**
      * Converts a Properties object to a Map<String, String>, calling {@link #toString} to ensure all keys and values

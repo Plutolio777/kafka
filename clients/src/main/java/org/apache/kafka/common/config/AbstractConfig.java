@@ -104,6 +104,7 @@ public class AbstractConfig {
     @SuppressWarnings("unchecked")
     public AbstractConfig(ConfigDef definition, Map<?, ?> originals, Map<String, ?> configProviderProps, boolean doLog) {
         /* check that all the keys are really strings */
+        // mark 遍历检查配置项如果有不为String的抛出异常
         for (Map.Entry<?, ?> entry : originals.entrySet())
             if (!(entry.getKey() instanceof String))
                 throw new ConfigException(entry.getKey().toString(), entry.getValue(), "Key must be a string.");
@@ -525,6 +526,7 @@ public class AbstractConfig {
     private Map<String, String> extractPotentialVariables(Map<?, ?> configMap) {
         // Variables are tuples of the form "${providerName:[path:]key}". From the configMap we extract the subset of configs with string
         // values as potential variables.
+        // mark 把传入的配置为字符串的entry提取出来
         Map<String, String> configMapAsString = new HashMap<>();
         for (Map.Entry<?, ?> entry : configMap.entrySet()) {
             if (entry.getValue() instanceof String)
@@ -535,42 +537,51 @@ public class AbstractConfig {
     }
 
     /**
-     * Instantiates given list of config providers and fetches the actual values of config variables from the config providers.
-     * returns a map of config key and resolved values.
+     * 解析配置变量的值。
+     * 该方法首先实例化给定的配置提供者列表，然后从这些配置提供者中获取配置变量的实际值。
+     * 最终返回一个包含配置键和解析后值的映射。
      *
-     * @param configProviderProps The map of config provider configs
-     * @param originals           The map of raw configs.
-     * @return map of resolved config variable.
+     * @param configProviderProps 配置提供者的属性映射，包含配置提供者的配置信息。
+     * @param originals           原始配置的映射，包含未经解析的配置变量。
+     * @return 包含解析后的配置变量的映射。
      */
     @SuppressWarnings("unchecked")
     private Map<String, ?> resolveConfigVariables(Map<String, ?> configProviderProps, Map<String, Object> originals) {
         Map<String, String> providerConfigString;
         Map<String, ?> configProperties;
         Map<String, Object> resolvedOriginals = new HashMap<>();
-        // As variable configs are strings, parse the originals and obtain the potential variable configs.
+        // 提取原始配置中的潜在变量配置。
         Map<String, String> indirectVariables = extractPotentialVariables(originals);
 
         resolvedOriginals.putAll(originals);
+        // 如果没有提供配置提供者属性，则将原始配置作为潜在变量配置。
         if (configProviderProps == null || configProviderProps.isEmpty()) {
             providerConfigString = indirectVariables;
             configProperties = originals;
         } else {
+            // 提取配置提供者属性中的潜在变量配置。
             providerConfigString = extractPotentialVariables(configProviderProps);
             configProperties = configProviderProps;
         }
+        // 实例化配置提供者。
         Map<String, ConfigProvider> providers = instantiateConfigProviders(providerConfigString, configProperties);
 
+        // 如果存在配置提供者，则使用配置提供者解析变量。
         if (!providers.isEmpty()) {
             ConfigTransformer configTransformer = new ConfigTransformer(providers);
             ConfigTransformerResult result = configTransformer.transform(indirectVariables);
+            // 将解析后的变量添加到解析后的原始配置中。
             if (!result.data().isEmpty()) {
                 resolvedOriginals.putAll(result.data());
             }
         }
+        // 关闭所有配置提供者。
         providers.values().forEach(x -> Utils.closeQuietly(x, "config provider"));
 
+        // 返回解析后的配置和原始配置的映射。
         return new ResolvingMap<>(resolvedOriginals, originals);
     }
+
 
     private Map<String, Object> configProviderProperties(String configProviderPrefix, Map<String, ?> providerConfigProperties) {
         Map<String, Object> result = new HashMap<>();

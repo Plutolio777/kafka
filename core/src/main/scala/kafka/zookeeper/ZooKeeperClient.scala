@@ -63,9 +63,11 @@ class ZooKeeperClient(connectString: String,
                       metricType: String,
                       private[zookeeper] val clientConfig: ZKClientConfig,
                       name: String) extends Logging with KafkaMetricsGroup {
-
+  // mark 日志前缀
   this.logIdent = s"[ZooKeeperClient $name] "
+  // mark 准备的读写锁
   private val initializationLock = new ReentrantReadWriteLock()
+  // mark 准备的可重入锁
   private val isConnectedOrExpiredLock = new ReentrantLock()
   private val isConnectedOrExpiredCondition = isConnectedOrExpiredLock.newCondition()
   private val zNodeChangeHandlers = new ConcurrentHashMap[String, ZNodeChangeHandler]().asScala
@@ -97,14 +99,16 @@ class ZooKeeperClient(connectString: String,
 
   info(s"Initializing a new session to $connectString.")
   // Fail-fast if there's an error during construction (so don't call initialize, which retries forever)
+  // mark 初始化zookeeper客户端session
   @volatile private var zooKeeper = new ZooKeeper(connectString, sessionTimeoutMs, ZooKeeperClientWatcher,
     clientConfig)
 
   newGauge("SessionState", () => connectionState.toString)
 
   metricNames += "SessionState"
-
+  // mark 启动调度器
   reinitializeScheduler.startup()
+  // mark 等待zookeeper连接建立
   try waitUntilConnected(connectionTimeoutMs, TimeUnit.MILLISECONDS)
   catch {
     case e: Throwable =>
@@ -248,6 +252,7 @@ class ZooKeeperClient(connectString: String,
     info("Waiting until connected.")
     var nanos = timeUnit.toNanos(timeout)
     inLock(isConnectedOrExpiredLock) {
+      // mark connectionState实际上是会调用zookeeper.getState()方法获取zookeeper的连接
       var state = connectionState
       while (!state.isConnected && state.isAlive) {
         if (nanos <= 0) {
@@ -256,11 +261,13 @@ class ZooKeeperClient(connectString: String,
         nanos = isConnectedOrExpiredCondition.awaitNanos(nanos)
         state = connectionState
       }
+      // mark 如果 state.isConnected == true 则说明连接成功
       if (state == States.AUTH_FAILED) {
         throw new ZooKeeperClientAuthFailedException("Auth failed either before or while waiting for connection")
       } else if (state == States.CLOSED) {
         throw new ZooKeeperClientExpiredException("Session expired either before or while waiting for connection")
       }
+      // mark 首次已经建立连接标志位
       isFirstConnectionEstablished = true
     }
     info("Connected.")

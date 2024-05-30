@@ -2338,9 +2338,25 @@ object KafkaZkClient {
     }
   }
 
+  /**
+   * 创建一个针对Kafka的ZooKeeper客户端。
+   *
+   * @param name           客户端的名称，用于标识不同的ZooKeeper客户端实例。
+   * @param time           用于提供当前时间的服务。[[org.apache.kafka.common.utils.SystemTime]]
+   * @param config         Kafka的配置信息，包含与ZooKeeper交互的各种配置。
+   * @param zkClientConfig ZooKeeper客户端的特定配置，例如SSL或SASL配置。
+   * @return 返回一个配置好的KafkaZkClient实例。
+   * @throws java.lang.SecurityException 如果启用了安全ACLs但ZooKeeper客户端TLS配置缺失或验证失败，则抛出安全异常。
+   */
   def createZkClient(name: String, time: Time, config: KafkaConfig, zkClientConfig: ZKClientConfig): KafkaZkClient = {
+    // mark 根据配置确定是否启用了安全ACLs和ZooKeeper安全机制
+    // mark zkEnableSecureAcls对应 zookeeper.enableSecureAcls 参数。这个参数用来控制是否启用ZooKeeper的安全访问控制列表（ACLs）。
+    // mark 如果设置为 true，那么Kafka将使用安全的ACLs来保护ZooKeeper中的数据，通常这会涉及到身份验证和授权。
+    // mark 如果设置为 false，则ZooKeeper的数据可能会对所有客户端开放，不进行安全性检查。在生产环境中，为了确保数据安全，通常会启用此选项。
     val secureAclsEnabled = config.zkEnableSecureAcls
     val isZkSecurityEnabled = JaasUtils.isZkSaslEnabled || KafkaConfig.zkTlsClientAuthEnabled(zkClientConfig)
+
+    // mark 如果启用了安全ACLs但未配置ZooKeeper安全机制，则抛出安全异常
 
     if (secureAclsEnabled && !isZkSecurityEnabled)
       throw new java.lang.SecurityException(
@@ -2349,6 +2365,7 @@ object KafkaZkClient {
           s"${KafkaConfig.ZkSslKeyStoreLocationProp} was not present and the verification of the JAAS login file failed " +
           s"${JaasUtils.zkSecuritySysConfigString}")
 
+    // mark 创建并返回一个配置好的KafkaZkClient实例
     KafkaZkClient(config.zkConnect, secureAclsEnabled, config.zkSessionTimeoutMs, config.zkConnectionTimeoutMs,
       config.zkMaxInFlightRequests, time, name = name, zkClientConfig = zkClientConfig,
       createChrootIfNecessary = true)

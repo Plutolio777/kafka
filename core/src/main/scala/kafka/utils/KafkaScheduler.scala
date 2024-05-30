@@ -74,15 +74,24 @@ class KafkaScheduler(val threads: Int,
   private var executor: ScheduledThreadPoolExecutor = _
   private val schedulerThreadId = new AtomicInteger(0)
 
+  /**
+   * 启动任务调度器。
+   * 该方法初始化任务调度器，并配置执行器以特定的策略运行任务。
+   * 注意：如果调度器已经启动，将抛出 IllegalStateException 异常。
+   */
   override def startup(): Unit = {
-    debug("Initializing task scheduler.")
-    this synchronized {
-      if(isStarted)
+    debug("Initializing task scheduler.") // 输出初始化日志
+
+    this synchronized { // 确保线程安全
+      if(isStarted) // 检查调度器是否已经启动
         throw new IllegalStateException("This scheduler has already been started!")
+      // mark 创建并配置 ScheduledThreadPoolExecutor 来进行任务的调度
       executor = new ScheduledThreadPoolExecutor(threads)
-      executor.setContinueExistingPeriodicTasksAfterShutdownPolicy(false)
-      executor.setExecuteExistingDelayedTasksAfterShutdownPolicy(false)
-      executor.setRemoveOnCancelPolicy(true)
+      executor.setContinueExistingPeriodicTasksAfterShutdownPolicy(false) // 关闭后不继续执行周期性任务
+      executor.setExecuteExistingDelayedTasksAfterShutdownPolicy(false) // 关闭后不执行已延迟的任务
+      executor.setRemoveOnCancelPolicy(true) // 取消任务时从队列中移除
+
+      // 设置线程工厂，为每个任务创建 KafkaThread
       executor.setThreadFactory(runnable =>
         new KafkaThread(threadNamePrefix + schedulerThreadId.getAndIncrement(), runnable, daemon))
     }

@@ -51,13 +51,15 @@ object Kafka extends Logging {
     // mark 解析xxx.properties配置文件
     val props = Utils.loadProps(args(0))
 
+    // mark 默认第一个参数是kafka的配置文件 如果后面还有参数则需要继续处理
     if (args.length > 1) {
       val options = optionParser.parse(args.slice(1, args.length): _*)
 
+      // mark 如果后面无选项参数个数大于0则打印帮助文档并退出 如-x -a -w
       if (options.nonOptionArguments().size() > 0) {
         CommandLineUtils.printUsageAndDie(optionParser, "Found non argument parameters: " + options.nonOptionArguments().toArray.mkString(","))
       }
-
+      // mark 只支持 key=value格式的参数 并增加到props中 启动命令行中的配置优先级更高！！！
       props ++= CommandLineUtils.parseKeyValueArgs(options.valuesOf(overrideOpt).asScala)
     }
     props

@@ -1453,8 +1453,10 @@ object KafkaConfig {
   def fromProps(props: Properties): KafkaConfig =
     fromProps(props, true)
 
-  def fromProps(props: Properties, doLog: Boolean): KafkaConfig =
+  def fromProps(props: Properties, doLog: Boolean): KafkaConfig = {
+    // mark 返回一个KafkaConfig
     new KafkaConfig(props, doLog)
+  }
 
   def fromProps(defaults: Properties, overrides: Properties): KafkaConfig =
     fromProps(defaults, overrides, true)
@@ -1512,12 +1514,15 @@ object KafkaConfig {
   }
 
   /**
+   *
    * Copy a configuration map, populating some keys that we want to treat as synonyms.
+   * 用于填充 broker.id 和 node.id 这两个同义词
    */
   def populateSynonyms(input: util.Map[_, _]): util.Map[Any, Any] = {
     val output = new util.HashMap[Any, Any](input)
-    val brokerId = output.get(KafkaConfig.BrokerIdProp)
-    val nodeId = output.get(KafkaConfig.NodeIdProp)
+    val brokerId = output.get(KafkaConfig.BrokerIdProp) // broker.id
+    val nodeId = output.get(KafkaConfig.NodeIdProp) // node.id
+    // mark broker.id 和 node.id 实际上是一样的而且必须要保持一致
     if (brokerId == null && nodeId != null) {
       output.put(KafkaConfig.BrokerIdProp, nodeId)
     } else if (brokerId != null && nodeId == null) {
