@@ -159,32 +159,63 @@ object CoreUtils {
   }
 
   /**
-   * This method gets comma separated values which contains key,value pairs and returns a map of
-   * key value pairs. the format of allCSVal is key1:val1, key2:val2 ....
-   * Also supports strings with multiple ":" such as IpV6 addresses, taking the last occurrence
-   * of the ":" in the pair as the split, eg a:b:c:val1, d:e:f:val2 => a:b:c -> val1, d:e:f -> val2
+   * 从包含逗号分隔的键值对字符串中解析数据，返回一个键值对映射的Map。
+   * 字符串格式应为：key1:val1, key2:val2，等等。此方法同时支持包含多个":"字符的字符串，
+   * 例如IPv6地址，通过取每对中的最后一个":"作为分隔点进行解析，例如 a:b:c:val1, d:e:f:val2
+   * 将被解析为 Map(a:b:c -> val1, d:e:f -> val2)。
+   *
+   * @param str 输入字符串，包含逗号分隔的键值对。
+   * @return 返回包含解析后的键值对的Map。
+   *         此方法获取包含键值对的逗号分隔值，并返回一个键值对的映射Map。
+   *         allCSVal的格式为key1:val1, key2:val2等。
+   *         同时支持包含多个":"的字符串，如IPv6地址，取每对中最后一个":"作为分割，
+   *         例如 a:b:c:val1, d:e:f:val2 => a:b:c -> val1, d:e:f -> val2。
+   *         PLAINTEXT://:9092,SSL://:9093 => PLAINTEXT:// -> 9092 SSL://->9093
    */
   def parseCsvMap(str: String): Map[String, String] = {
+    // 初始化一个可变的HashMap以存储解析出的键值对。
     val map = new mutable.HashMap[String, String]
+    // 如果输入字符串为空，则直接返回一个空Map。
     if ("".equals(str))
       return map
-    val keyVals = str.split("\\s*,\\s*").map(s => {
-      val lio = s.lastIndexOf(":")
-      (s.substring(0,lio).trim, s.substring(lio + 1).trim)
-    })
+    // 将输入字符串按逗号及周边空白分割，然后映射每个分割得到的字符串，
+    // 找到最后一个":"的位置，以此分割并去除前后空白，得到键值对。
+    val keyVals = str.split("\\s*,\\s*").map { s =>
+      val lastColonIndex = s.lastIndexOf(":")
+      (s.substring(0, lastColonIndex).trim, s.substring(lastColonIndex + 1).trim)
+    }
+    // 将解析出的键值对序列转换为Map并返回。
     keyVals.toMap
   }
 
+
   /**
-   * Parse a comma separated string into a sequence of strings.
-   * Whitespace surrounding the comma will be removed.
+   * 将逗号分隔的字符串解析为字符串序列。
+   * 此方法用于处理CSV（逗号分隔值）格式的字符串，将其拆分为单个元素以便进一步处理。
+   *
+   * @param csvList 待解析的逗号分隔字符串。逗号周围可能包含空格。例如："PLAINTEXT://:9092,SSL://:9093"
+   * @return 从输入字符串中解析出的字符串序列。如果输入字符串为null或为空，则返回一个空序列。
+   *
+   *         示例：
+   *         输入：parseCsvList("PLAINTEXT://:9092,SSL://:9093")
+   *         输出：Seq("PLAINTEXT://:9092", "SSL://:9093")
+   *
+   *         输入：parseCsvList("")
+   *         输出：Seq()
+   *
+   *         输入：parseCsvList(null)
+   *         输出：Seq()
    */
   def parseCsvList(csvList: String): Seq[String] = {
+    // 检查输入字符串是否为null或为空，如果是，则直接返回一个空序列
     if (csvList == null || csvList.isEmpty)
       Seq.empty[String]
-    else
+    else {
+      // 使用正则表达式匹配逗号周围的所有空格进行分割，然后过滤掉任何空字符串
       csvList.split("\\s*,\\s*").filter(v => !v.equals(""))
+    }
   }
+
 
   /**
    * Create an instance of the class with the given class name
@@ -248,6 +279,16 @@ object CoreUtils {
       .keys
   }
 
+  /**
+   * 根据监听器列表和安全协议映射，转换为EndPoints。
+   *
+   * 此方法提供了一个从监听器名称字符串到端点序列的转换过程，它综合考虑了监听器和对应的安全协议。
+   * 主要用于在Kafka中将配置的监听器信息转换为实际的服务器端点信息，以便于进一步的网络通信配置。
+   *
+   * @param listeners           一个包含监听器名称的字符串，多个监听器之间用逗号分隔。
+   * @param securityProtocolMap 一个映射，将监听器名称映射到对应的安全协议。安全协议定义了监听器使用的加密和认证机制。
+   * @return 返回一个端点序列，每个端点代表了一个监听器和其对应的安全协议组合。
+   */
   def listenerListToEndPoints(listeners: String, securityProtocolMap: Map[ListenerName, SecurityProtocol]): Seq[EndPoint] = {
     listenerListToEndPoints(listeners, securityProtocolMap, true)
   }
@@ -266,7 +307,9 @@ object CoreUtils {
     }
 
     val endPoints = try {
+      // mark 按照逗号将listeners=PLAINTEXT://:9092,SSL://:9093分割
       val listenerList = parseCsvList(listeners)
+      // mark  遍历生成EndPoint对象
       listenerList.map(EndPoint.createEndPoint(_, Some(securityProtocolMap)))
     } catch {
       case e: Exception =>

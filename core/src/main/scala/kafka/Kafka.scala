@@ -79,7 +79,7 @@ object Kafka extends Logging {
    * @return 根据配置要求返回一个KafkaServer或者KafkaRaftServer实例。
    */
   private def buildServer(props: Properties): Server = {
-    // mark Properties -> KafkaConfig对象
+    // mark Properties -> KafkaConfig对象 其中包括配置解析
     val config = KafkaConfig.fromProps(props, doLog = false)
 
     // mark 根据配置决定创建的服务器类型

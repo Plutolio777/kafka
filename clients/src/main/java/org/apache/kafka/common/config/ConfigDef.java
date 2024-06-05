@@ -471,35 +471,48 @@ public class ConfigDef {
      * the appropriate type (int, string, etc).
      */
     public Map<String, Object> parse(Map<?, ?> props) {
-        // Check all configurations are defined
+        // mark 检查配置依赖定义是否正确 如果不正确则抛出异常 undefinedDependentConfigs
         List<String> undefinedConfigKeys = undefinedDependentConfigs();
         if (!undefinedConfigKeys.isEmpty()) {
             String joined = Utils.join(undefinedConfigKeys, ",");
             throw new ConfigException("Some configurations in are referred in the dependents, but not defined: " + joined);
         }
         // parse all known keys
+        // mark 根据配置定义从props中秋凷正确的配置 如果不存在则填充默认值
         Map<String, Object> values = new HashMap<>();
         for (ConfigKey key : configKeys.values())
             values.put(key.name, parseValue(key, props.get(key.name), props.containsKey(key.name)));
         return values;
     }
 
+    /**
+     * 解析给定的配置键对应的值。
+     *
+     * @param key   配置键，ConfigKey类型 对配置定义的抽象包括配置的名称 类型 默认值 依赖的其他配置等等
+     * @param value 配置项的原始值，需要根据配置键的类型进行解析。
+     * @param isSet 原始配置中是否存在值
+     * @return 解析后的配置值对象。
+     * @throws ConfigException 如果配置项为必须设置且没有提供默认值，或者解析过程中出现错误，则抛出此异常。
+     */
     Object parseValue(ConfigKey key, Object value, boolean isSet) {
         Object parsedValue;
         if (isSet) {
+            // 如果配置项已经被设置，则解析其值
             parsedValue = parseType(key.name, value, key.type);
-        // props map doesn't contain setting, the key is required because no default value specified - its an error
         } else if (NO_DEFAULT_VALUE.equals(key.defaultValue)) {
+            // 如果配置项没有默认值且未被设置，则抛出异常
             throw new ConfigException("Missing required configuration \"" + key.name + "\" which has no default value.");
         } else {
-            // otherwise assign setting its default value
+            // 否则，使用配置键的默认值
             parsedValue = key.defaultValue;
         }
+        // mark ConfigKey 中validator是Validator接口 用于对value进行校验
         if (key.validator != null) {
             key.validator.ensureValid(key.name, parsedValue);
         }
         return parsedValue;
     }
+
 
     /**
      * Validate the current configuration values with the configuration definition.
@@ -548,17 +561,30 @@ public class ConfigDef {
         return configValues;
     }
 
+    /**
+     * mark 用于检查配置的依赖项是否都正确 都已经被定义了 配置定义的自检
+     * 查找所有未定义的依赖配置项
+     *
+     *
+     * @return List<String> 未定义的配置项键名列表
+     */
     private List<String> undefinedDependentConfigs() {
+        // 创建一个集合用于存储未定义的配置项键名
         Set<String> undefinedConfigKeys = new HashSet<>();
+        // 遍历所有配置项
         for (ConfigKey configKey : configKeys.values()) {
+            // 遍历当前配置项的依赖项
             for (String dependent: configKey.dependents) {
+                // 如果依赖项不存在于配置项键名集合中，则将其添加到未定义的配置项集合中
                 if (!configKeys.containsKey(dependent)) {
                     undefinedConfigKeys.add(dependent);
                 }
             }
         }
+        // 将未定义的配置项集合转换为列表并返回
         return new ArrayList<>(undefinedConfigKeys);
     }
+
 
     // package accessible for testing
     Set<String> getConfigsWithNoParent() {

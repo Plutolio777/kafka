@@ -112,7 +112,9 @@ class KafkaServer(
   var kafkaYammerMetrics: KafkaYammerMetrics = _
   var metrics: Metrics = _
 
+  // mark 数据面板处理器
   @volatile var dataPlaneRequestProcessor: KafkaApis = _
+  // mark 控制面板处理器
   var controlPlaneRequestProcessor: KafkaApis = _
 
   var authorizer: Option[Authorizer] = None
@@ -216,13 +218,17 @@ class KafkaServer(
         configRepository = new ZkConfigRepository(new AdminZkClient(zkClient))
 
         /* Get or create cluster_id */
+        // mark 获取或者生成集群ID（uuid的base64编码）
         _clusterId = getOrGenerateClusterId(zkClient)
         info(s"Cluster ID = $clusterId")
 
         /* load metadata */
+        // mark 加载每个logs文件夹中的所有元数据文件 meta.properties
+        // mark preloadedBrokerMetadataCheckpoint 为meta.properties文件的抽象
+        // mark initialOfflineDirs 为发生IO异常的所有数据目录集合
         val (preloadedBrokerMetadataCheckpoint, initialOfflineDirs) =
           BrokerMetadataCheckpoint.getBrokerMetadataAndOfflineDirs(config.logDirs, ignoreMissing = true, kraftMode = false)
-
+        // mark 元数据版本不为0抛出异常
         if (preloadedBrokerMetadataCheckpoint.version != 0) {
           throw new RuntimeException(s"Found unexpected version in loaded `meta.properties`: " +
             s"$preloadedBrokerMetadataCheckpoint. Zk-based brokers only support version 0 " +

@@ -2054,18 +2054,28 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
     }
   }
 
+  /**
+   * 在与ZooKeeper建立连接后，重试发送请求。
+   * 当在发送请求过程中失去与ZooKeeper的连接时，此方法处理请求的重试情况。
+   *
+   * @param requests 要发送到ZooKeeper的异步请求序列。
+   * @return 请求的响应结果序列。
+   */
   private def retryRequestsUntilConnected[Req <: AsyncRequest](requests: Seq[Req]): Seq[Req#Response] = {
     val remainingRequests = new mutable.ArrayBuffer(requests.size) ++= requests
     val responses = new mutable.ArrayBuffer[Req#Response]
+    // 循环处理请求，直到剩余请求为空
     while (remainingRequests.nonEmpty) {
       val batchResponses = zooKeeperClient.handleRequests(remainingRequests)
 
+      // 更新延迟度量
       batchResponses.foreach(response => latencyMetric.update(response.metadata.responseTimeMs))
 
-      // Only execute slow path if we find a response with CONNECTIONLOSS
+      // 如果存在CONNECTIONLOSS结果码，执行慢路径
       if (batchResponses.exists(_.resultCode == Code.CONNECTIONLOSS)) {
         val requestResponsePairs = remainingRequests.zip(batchResponses)
 
+        // 清空剩余请求列表，根据响应结果处理请求
         remainingRequests.clear()
         requestResponsePairs.foreach { case (request, response) =>
           if (response.resultCode == Code.CONNECTIONLOSS)
@@ -2074,15 +2084,18 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
             responses += response
         }
 
+        // 如果仍有未处理的请求，等待ZooKeeper重新连接
         if (remainingRequests.nonEmpty)
           zooKeeperClient.waitUntilConnected()
       } else {
+        // 没有CONNECTIONLOSS，直接清空并添加所有响应
         remainingRequests.clear()
         responses ++= batchResponses
       }
     }
     responses
   }
+
 
   private def checkedEphemeralCreate(path: String, data: Array[Byte]): Stat = {
     val checkedEphemeral = new CheckedEphemeral(path, data)

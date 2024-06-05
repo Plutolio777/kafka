@@ -21,18 +21,18 @@ import org.apache.kafka.common.config.provider.ConfigProvider;
 import java.util.Map;
 
 /**
- * The result of a transformation from {@link ConfigTransformer}.
+ * 从 {@link ConfigTransformer} 转换得到的结果。
  */
 public class ConfigTransformerResult {
 
-    private Map<String, Long> ttls;
-    private Map<String, String> data;
+    private Map<String, Long> ttls; // 路径到TTL（生存时间）值的映射
+    private Map<String, String> data; // 转换后的数据，键值对形式
 
     /**
-     * Creates a new ConfigTransformerResult with the given data and TTL values for a set of paths.
+     * 使用给定的数据和TTL值构造一个新的 ConfigTransformerResult 实例。
      *
-     * @param data a Map of key-value pairs
-     * @param ttls a Map of path and TTL values (in milliseconds)
+     * @param data     转换后得到的数据，以键值对形式存储。
+     * @param ttls     路径到其TTL（生存时间）值的映射，单位为毫秒。
      */
     public ConfigTransformerResult(Map<String, String> data, Map<String, Long> ttls) {
         this.data = data;
@@ -40,24 +40,23 @@ public class ConfigTransformerResult {
     }
 
     /**
-     * Returns the transformed data, with variables replaced with corresponding values from the
-     * ConfigProvider instances if found.
+     * 返回转换后得到的数据，如果找到对应的变量，会将其替换为 {@link ConfigProvider} 实例中的相应值。
      *
-     * <p>Modifying the transformed data that is returned does not affect the {@link ConfigProvider} nor the
-     * original data that was used as the source of the transformation.
+     * <p>修改返回的转换后数据不会影响 {@link ConfigProvider}，也不会影响用于转换的原始数据。
      *
-     * @return data a Map of key-value pairs
+     * @return 转换后得到的数据，以键值对形式存储。
      */
     public Map<String, String> data() {
         return data;
     }
 
     /**
-     * Returns the TTL values (in milliseconds) returned from the ConfigProvider instances for a given set of paths.
+     * 返回从 {@link ConfigProvider} 实例为给定路径集返回的TTL（生存时间）值（以毫秒为单位）。
      *
-     * @return data a Map of path and TTL values
+     * @return 路径到其TTL（生存时间）值的映射。
      */
     public Map<String, Long> ttls() {
         return ttls;
     }
 }
+

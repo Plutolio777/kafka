@@ -51,12 +51,16 @@ public class AbstractConfig {
     private final Set<String> used = ConcurrentHashMap.newKeySet();
 
     /* the original values passed in by the user */
+    // mark 从配置文件中解析的原始配置
     private final Map<String, ?> originals;
 
     /* the parsed values */
+    // mark 原始配置经过内部配置解析之后的kafka完整配置
     private final Map<String, Object> values;
 
+    // mark kafka内部约定的所有配置项的定义
     private final ConfigDef definition;
+
 
     public static final String CONFIG_PROVIDERS_CONFIG = "config.providers";
 
@@ -103,7 +107,7 @@ public class AbstractConfig {
         for (Map.Entry<String, Object> update : configUpdates.entrySet()) {
             this.values.put(update.getKey(), update.getValue());
         }
-        // 重新解析更新后的配置以确保其有效性
+        // mark 重新解析更新后的配置以确保其有效性
         definition.parse(this.values);
         this.definition = definition;
         // mark 启动流程里打印的所有配置是在这里打印的
@@ -135,7 +139,6 @@ public class AbstractConfig {
      */
     public AbstractConfig(ConfigDef definition, Map<?, ?> originals, boolean doLog) {
         this(definition, originals, Collections.emptyMap(), doLog);
-
     }
 
     /**
@@ -562,19 +565,20 @@ public class AbstractConfig {
         // mark 这个方法是创建指定的ConfigProvider
         Map<String, ConfigProvider> providers = instantiateConfigProviders(providerConfigString, configProperties);
 
-        // 如果存在配置提供者，则使用配置提供者解析变量。
+        // mark 如果有Config Provider，则使用配置提供者解析变量。
         if (!providers.isEmpty()) {
+            // mark ConfigTransformer 是中间的一个桥梁 负责解析配置中的占位符 然后从Provider中提取对应的配置
             ConfigTransformer configTransformer = new ConfigTransformer(providers);
             ConfigTransformerResult result = configTransformer.transform(indirectVariables);
-            // 将解析后的变量添加到解析后的原始配置中。
+            // mark 将解析后的变量添加到解析后的原始配置中。
             if (!result.data().isEmpty()) {
                 resolvedOriginals.putAll(result.data());
             }
         }
-        // 关闭所有配置提供者。
+        // mark 关闭所有配置提供者。
         providers.values().forEach(x -> Utils.closeQuietly(x, "config provider"));
 
-        // 返回解析后的配置和原始配置的映射。
+        // mark 返回解析后的配置和原始配置的映射。
         return new ResolvingMap<>(resolvedOriginals, originals);
     }
 

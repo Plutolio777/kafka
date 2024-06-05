@@ -390,8 +390,11 @@ object KafkaConfig {
   val NumReplicaAlterLogDirsThreadsProp = "num.replica.alter.log.dirs.threads"
   val QueuedMaxRequestsProp = "queued.max.requests"
   val QueuedMaxBytesProp = "queued.max.request.bytes"
+
   val RequestTimeoutMsProp = CommonClientConfigs.REQUEST_TIMEOUT_MS_CONFIG
+
   val ConnectionSetupTimeoutMsProp = CommonClientConfigs.SOCKET_CONNECTION_SETUP_TIMEOUT_MS_CONFIG
+
   val ConnectionSetupTimeoutMaxMsProp = CommonClientConfigs.SOCKET_CONNECTION_SETUP_TIMEOUT_MAX_MS_CONFIG
 
   /** KRaft mode configs */
@@ -421,8 +424,19 @@ object KafkaConfig {
   val EarlyStartListenersProp = "early.start.listeners"
 
   /** ********* Socket Server Configuration ***********/
+
+  /**
+   * listeners socket用于监听网络请求的地址
+   * advertised.listeners 对外发布的一个地址（只是为了让其他机器或者发送段知道我应该往哪里发数据）
+   */
   val ListenersProp = "listeners"
   val AdvertisedListenersProp = "advertised.listeners"
+  /**
+   * listener.security.protocol.map 是 Kafka 中的一项配置属性，用于映射监听器名称到安全协议。这项配置允许 Kafka 为不同的监听器指定不同的安全协议，
+   * 例如 PLAINTEXT、SSL、SASL_PLAINTEXT 或 SASL_SSL。
+   * listeners=PLAINTEXT://:9092,SSL://:9093
+   * listener.security.protocol.map=PLAINTEXT:PLAINTEXT,SSL:SSL
+   */
   val ListenerSecurityProtocolMapProp = "listener.security.protocol.map"
   val ControlPlaneListenerNameProp = "control.plane.listener.name"
   val SocketSendBufferBytesProp = "socket.send.buffer.bytes"
@@ -1542,7 +1556,10 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
 
   // Cache the current config to avoid acquiring read lock to access from dynamicConfig
   @volatile private var currentConfig = this
+
+  // mark 解析配置中当前broker的角色
   val processRoles: Set[ProcessRole] = parseProcessRoles()
+  // mark 生成动态配置实例
   private[server] val dynamicConfig = dynamicConfigOverride.getOrElse(new DynamicBrokerConfig(this))
 
   private[server] def updateCurrentConfig(newConfig: KafkaConfig): Unit = {
@@ -1552,6 +1569,8 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
   // The following captures any system properties impacting ZooKeeper TLS configuration
   // and defines the default values this instance will use if no explicit config is given.
   // We make it part of each instance rather than the object to facilitate testing.
+  // mark 这里对ZooKeeper TLS配置进行解析，并在配置缺省时给出对应的默认值
+  // mark 创建了一个zookeeper配置对象 直接调用的原生API 这个里面会加载一些系统配置以及JVM相关配置
   private val zkClientConfigViaSystemProperties = new ZKClientConfig()
 
   override def originals: util.Map[String, AnyRef] =
@@ -1576,11 +1595,17 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
     super.valuesWithPrefixOverride(prefix)
 
   /** ********* Zookeeper Configuration ***********/
+  // mark zookeeper的连接地址 zookeeper.connect
   val zkConnect: String = getString(KafkaConfig.ZkConnectProp)
+  // mark zookeeper的会话超时时间 zookeeper.session.timeout.ms
   val zkSessionTimeoutMs: Int = getInt(KafkaConfig.ZkSessionTimeoutMsProp)
+  // mark zookeeper的连接超时时间 zookeeper.connection.timeout.ms
   val zkConnectionTimeoutMs: Int =
     Option(getInt(KafkaConfig.ZkConnectionTimeoutMsProp)).map(_.toInt).getOrElse(getInt(KafkaConfig.ZkSessionTimeoutMsProp))
+
+  // mark zookeeper是否开启安全访问控制 zookeeper.enable.secure.acls
   val zkEnableSecureAcls: Boolean = getBoolean(KafkaConfig.ZkEnableSecureAclsProp)
+  // mark zookeeper的最大请求数
   val zkMaxInFlightRequests: Int = getInt(KafkaConfig.ZkMaxInFlightRequestsProp)
 
   private val _remoteLogManagerConfig = new RemoteLogManagerConfig(this)
@@ -1629,7 +1654,9 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
     }
   }
 
+  // mark zookeeper ssl连接相关配置
   val zkSslClientEnable = zkBooleanConfigOrSystemPropertyWithDefaultValue(KafkaConfig.ZkSslClientEnableProp)
+  // mark 以下的配置都用Option进行了包装 防止空指针的问题
   val zkClientCnxnSocketClassName = zkOptionalStringConfigOrSystemProperty(KafkaConfig.ZkClientCnxnSocketProp)
   val zkSslKeyStoreLocation = zkOptionalStringConfigOrSystemProperty(KafkaConfig.ZkSslKeyStoreLocationProp)
   val zkSslKeyStorePassword = zkPasswordConfigOrSystemProperty(KafkaConfig.ZkSslKeyStorePasswordProp)
@@ -1648,6 +1675,7 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
     if (actuallyProvided)
       getString(kafkaProp)
     else {
+
       KafkaConfig.zooKeeperClientProperty(zkClientConfigViaSystemProperties, kafkaProp) match {
         case Some("true") => "HTTPS"
         case Some(_) => ""
@@ -1658,20 +1686,41 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
   val ZkSslCrlEnable = zkBooleanConfigOrSystemPropertyWithDefaultValue(KafkaConfig.ZkSslCrlEnableProp)
   val ZkSslOcspEnable = zkBooleanConfigOrSystemPropertyWithDefaultValue(KafkaConfig.ZkSslOcspEnableProp)
   /** ********* General Configuration ***********/
+  // mark broker.id.generation.enable是否开启自动生成broker id 默认不开启
   val brokerIdGenerationEnable: Boolean = getBoolean(KafkaConfig.BrokerIdGenerationEnableProp)
+  // mark reserved.broker.max.id 指定 Kafka 集群中自动分配的 broker ID 的最大值。
   val maxReservedBrokerId: Int = getInt(KafkaConfig.MaxReservedBrokerIdProp)
+  // mark 获取briker.id
   var brokerId: Int = getInt(KafkaConfig.BrokerIdProp)
+  // mark 获取node.id
   val nodeId: Int = getInt(KafkaConfig.NodeIdProp)
+  // mark initial.broker.registration.timeout.ms 它用于控制在 Kafka 集群启动时，Kafka Broker 等待注册成功的超时时间。
   val initialRegistrationTimeoutMs: Int = getInt(KafkaConfig.InitialBrokerRegistrationTimeoutMsProp)
+  // mark broker.heartbeat.interval.ms 想kafka controller发送心跳的时间间隔
   val brokerHeartbeatIntervalMs: Int = getInt(KafkaConfig.BrokerHeartbeatIntervalMsProp)
+  // mark broker.session.timeout.ms用于控制Broker与Controller的session会话超时时间
   val brokerSessionTimeoutMs: Int = getInt(KafkaConfig.BrokerSessionTimeoutMsProp)
 
+  // mark 如果角色集合为空则不需要zookeeper 也就是说如果配置中直接指定了broker的角色 则不需要zookeeper
+  // mark 因为在zookeeper中是不需要自己管理集群角色的 都是交给zookeeper去做
   def requiresZookeeper: Boolean = processRoles.isEmpty
+
+  // mark 如果角色集合不为空则启动自我管理仲裁机制
   def usesSelfManagedQuorum: Boolean = processRoles.nonEmpty
 
+  // mark 是否启用 Kafka 从 ZooKeeper 向自管理元数据模式（如 KRaft）迁移的功能。
   val migrationEnabled: Boolean = getBoolean(KafkaConfig.MigrationEnabledProp)
 
+  /**
+   * 解析配置中指定的process.roles属性，并返回一个去重后的角色集合。
+   * 这个方法首先将配置中的process.roles属性转换为Scala的List，然后映射到对应的ProcessRole枚举值。
+   * 如果遇到未知的角色名称，将抛出ConfigException异常。
+   * 如果配置中存在重复的角色名称，同样会抛出ConfigException异常。
+   *
+   * @return Set[ProcessRole] 返回一个不包含重复角色的集合。
+   */
   private def parseProcessRoles(): Set[ProcessRole] = {
+    // mark 解析process.roles配置，并映射到ProcessRole枚举
     val roles = getList(KafkaConfig.ProcessRolesProp).asScala.map {
       case "broker" => BrokerRole
       case "controller" => ControllerRole
@@ -1679,8 +1728,10 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
         " (only 'broker' and 'controller' are allowed roles)")
     }
 
+    // mark 将角色列表转换为集合以去除重复项
     val distinctRoles: Set[ProcessRole] = roles.toSet
 
+    // mark 如果存在重复角色，则抛出异常
     if (distinctRoles.size != roles.size) {
       throw new ConfigException(s"Duplicate role names found in `${KafkaConfig.ProcessRolesProp}`: $roles")
     }
@@ -1688,14 +1739,33 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
     distinctRoles
   }
 
+
+  /**
+   * 判断当前进程是否处于KRaft协调居民模式。
+   *
+   * 在KRaft模式中，Broker和Controller角色可能共享同一个进程。此方法检查当前进程是否同时担任了Broker和Controller角色，
+   * 以此来确定是否处于KRaft协调居民模式。
+   *
+   * @return 如果当前进程同时担任Broker和Controller角色，则返回true；否则返回false。
+   */
   def isKRaftCoResidentMode: Boolean = {
     processRoles == Set(BrokerRole, ControllerRole)
   }
 
+
+  /**
+   * 获取元数据日志目录。 如果启用非zookeeper模式 需要将元数据进行落盘
+   *
+   * 本方法旨在确定元数据日志的存储位置。它首先尝试从配置中获取指定的元数据日志目录。
+   * 如果配置中未明确指定该目录，则默认使用可用的日志目录中的第一个。
+   *
+   * @return 元数据日志目录的字符串表示。
+   */
   def metadataLogDir: String = {
+    // 尝试从配置中获取元数据日志目录
     Option(getString(KafkaConfig.MetadataLogDirProp)) match {
-      case Some(dir) => dir
-      case None => logDirs.head
+      case Some(dir) => dir // 如果配置存在，则返回该目录
+      case None => logDirs.head // 如果配置不存在，则返回默认的日志目录
     }
   }
 
@@ -1706,12 +1776,19 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
 
   def numNetworkThreads = getInt(KafkaConfig.NumNetworkThreadsProp)
   def backgroundThreads = getInt(KafkaConfig.BackgroundThreadsProp)
+
+  // mark queued.max.requests限制 Kafka Broker 在处理客户端请求时，可以在队列中积压的最大请求数。
   val queuedMaxRequests = getInt(KafkaConfig.QueuedMaxRequestsProp)
+  // mark queued.max.requests限制 Kafka Broker 在处理客户端请求时，可以在队列中积压的最大字节数。
   val queuedMaxBytes = getLong(KafkaConfig.QueuedMaxBytesProp)
   def numIoThreads = getInt(KafkaConfig.NumIoThreadsProp)
   def messageMaxBytes = getInt(KafkaConfig.MessageMaxBytesProp)
+
+  // mark request.timeout.ms 配置项用于控制 Broker 处理请求的超时时间。它定义了 Broker 在处理客户端请求时，等待请求完成的最长时间
   val requestTimeoutMs = getInt(KafkaConfig.RequestTimeoutMsProp)
+  // mark socket.connection.setup.timeout.ms设置 Kafka Broker 在与客户端建立网络连接时，等待连接成功的最大时间。
   val connectionSetupTimeoutMs = getLong(KafkaConfig.ConnectionSetupTimeoutMsProp)
+  // mark socket.connection.setup.timeout.max.ms 设置 Kafka Broker 在与客户端建立网络连接时，等待连接成功的最大时间。
   val connectionSetupTimeoutMaxMs = getLong(KafkaConfig.ConnectionSetupTimeoutMaxMsProp)
 
   def getNumReplicaAlterLogDirsThreads: Int = {
@@ -1720,8 +1797,15 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
   }
 
   /************* Metadata Configuration ***********/
+  /**
+   * Kafka 集群中的元数据日志包含了集群配置信息、主题、分区、分配等关键数据。为了确保这些元数据在崩溃或重启时能够快速恢复，
+   * Kafka 定期创建快照，将当前的元数据状态保存到一个快照文件中。以下是与元数据相关的一些配置项
+   */
+  // mark metadata.log.max.record.bytes.between.snapshots 指定在创建新的元数据日志快照之前，Kafka 元数据日志中允许的最大记录字节数。
   val metadataSnapshotMaxNewRecordBytes = getLong(KafkaConfig.MetadataSnapshotMaxNewRecordBytesProp)
+  // mark metadata.log.max.snapshot.interval.ms 指定 Kafka 创建新的元数据日志快照的最大时间间隔。
   val metadataSnapshotMaxIntervalMs = getLong(KafkaConfig.MetadataSnapshotMaxIntervalMsProp)
+  // mark metadata.max.idle.interval.ms 
   val metadataMaxIdleIntervalNs: Option[Long] = {
     val value = TimeUnit.NANOSECONDS.convert(getInt(KafkaConfig.MetadataMaxIdleIntervalMsProp).toLong, TimeUnit.MILLISECONDS)
     if (value > 0) Some(value) else None
@@ -1774,6 +1858,7 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
   /** ********* Log Configuration ***********/
   val autoCreateTopicsEnable = getBoolean(KafkaConfig.AutoCreateTopicsEnableProp)
   val numPartitions = getInt(KafkaConfig.NumPartitionsProp)
+  /** log.dirs:卡夫卡的日志目录，默认为/tmp/kafka-logs */
   val logDirs = CoreUtils.parseCsvList(Option(getString(KafkaConfig.LogDirsProp)).getOrElse(getString(KafkaConfig.LogDirProp)))
   def logSegmentBytes = getInt(KafkaConfig.LogSegmentBytesProp)
   def logFlushIntervalMessages = getLong(KafkaConfig.LogFlushIntervalMessagesProp)
@@ -2001,6 +2086,14 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
     }
   }
 
+  /**
+   * 获取监听器列表。
+   *
+   * 本方法通过解析配置获取Kafka服务器的监听器序列。监听器定义了Kafka服务器如何接收来自客户端的连接和请求。
+   * 它们是Kafka提供服务的关键组件，允许多种类型的客户端以不同的协议和安全性连接到服务器。
+   *
+   * @return Seq[EndPoint] - 返回一个序列，其中包含所有监听器的端点信息。每个监听器端点代表一个服务器接收连接的网络地址和端口。
+   */
   def listeners: Seq[EndPoint] =
     CoreUtils.listenerListToEndPoints(getString(KafkaConfig.ListenersProp), effectiveListenerSecurityProtocolMap)
 
@@ -2080,30 +2173,46 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
     }
   }
 
+  /**
+   * 获取有效监听器安全协议映射。
+   *
+   * 此方法根据配置确定每个监听器的安全协议。如果使用自管理集群（KRaft）模式，
+   * 且未显式配置监听器安全协议映射，则会为控制器监听器添加默认的PLAINTEXT协议，
+   * 除非已经配置了SSL或SASL协议。
+   *
+   * @return 监听器名称与其安全协议的映射。
+   */
   def effectiveListenerSecurityProtocolMap: Map[ListenerName, SecurityProtocol] = {
+    // mark 从配置中获取监听器安全协议映射，并规范化监听器名称
+    // mark getMap 方法会将 A:B:C,A1:B2:C1方法先按照逗号分隔然后再按照最后一个冒号分割生成一个map
+    // mark 是用来处理 listener.security.protocol.map 比如 PLAINTEXT:PLAINTEXT,SSL:SSL 生成监听器->协议的映射
+    // mark ListenerName 是对监听器名称包装, SecurityProtocol是安全协议的枚举对象
     val mapValue = getMap(KafkaConfig.ListenerSecurityProtocolMapProp, getString(KafkaConfig.ListenerSecurityProtocolMapProp))
       .map { case (listenerName, protocolName) =>
         ListenerName.normalised(listenerName) -> getSecurityProtocol(protocolName, KafkaConfig.ListenerSecurityProtocolMapProp)
       }
+
+    // mark (kRrft模式)如果使用自管理集群模式，并且没有显式配置监听器安全协议映射
     if (usesSelfManagedQuorum && !originals.containsKey(ListenerSecurityProtocolMapProp)) {
-      // Nothing was specified explicitly for listener.security.protocol.map, so we are using the default value,
-      // and we are using KRaft.
-      // Add PLAINTEXT mappings for controller listeners as long as there is no SSL or SASL_{PLAINTEXT,SSL} in use
+      // 定义一个方法来检查是否使用了SSL或SASL协议
       def isSslOrSasl(name: String): Boolean = name.equals(SecurityProtocol.SSL.name) || name.equals(SecurityProtocol.SASL_SSL.name) || name.equals(SecurityProtocol.SASL_PLAINTEXT.name)
-      // check controller listener names (they won't appear in listeners when process.roles=broker)
-      // as well as listeners for occurrences of SSL or SASL_*
+
+      // 如果控制器监听器或监听器列表中使用了SSL或SASL协议，则不添加默认映射
+      // 否则，为所有不是PLAINTEXT的控制器监听器添加PLAINTEXT协议映射
       if (controllerListenerNames.exists(isSslOrSasl) ||
         parseCsvList(getString(KafkaConfig.ListenersProp)).exists(listenerValue => isSslOrSasl(EndPoint.parseListenerName(listenerValue)))) {
-        mapValue // don't add default mappings since we found something that is SSL or SASL_*
+        mapValue // 不添加默认映射
       } else {
-        // add the PLAINTEXT mappings for all controller listener names that are not explicitly PLAINTEXT
+        // 添加默认的PLAINTEXT映射
         mapValue ++ controllerListenerNames.filterNot(SecurityProtocol.PLAINTEXT.name.equals(_)).map(
           new ListenerName(_) -> SecurityProtocol.PLAINTEXT)
       }
     } else {
+      // 返回原始映射
       mapValue
     }
   }
+
 
   // Topic IDs are used with all self-managed quorum clusters and ZK cluster with IBP greater than or equal to 2.8
   def usesTopicId: Boolean =

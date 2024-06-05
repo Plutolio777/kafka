@@ -155,21 +155,40 @@ case class MetaProperties(
 }
 
 object BrokerMetadataCheckpoint extends Logging {
+
+  /**
+   * 获取Broker元数据和离线目录。
+   *
+   * 从给定的日志目录中读取元数据，并识别任何离线目录。如果指定了忽略缺失的元数据，
+   * 则不会因未找到元数据文件而抛出异常。
+   *
+   * @param logDirs       日志目录的序列，从中读取元数据。
+   * @param ignoreMissing 指示是否应该忽略未找到元数据的情况。
+   * @param kraftMode     指示是否处于KRaft模式。
+   * @return 元数据属性和离线目录的元组。如果未找到任何元数据，则元数据属性为空。
+   */
   def getBrokerMetadataAndOfflineDirs(
     logDirs: collection.Seq[String],
     ignoreMissing: Boolean,
     kraftMode: Boolean
   ): (RawMetaProperties, collection.Seq[String]) = {
+    // mark 确保至少有一个日志目录以读取元数据
     require(logDirs.nonEmpty, "Must have at least one log dir to read meta.properties")
 
+    // mark 用于存储从各日志目录读取的Broker元数据 Map{logs -> Properties}
     val brokerMetadataMap = mutable.HashMap[String, Properties]()
+    // mark 离线目录集合
     val offlineDirs = mutable.ArrayBuffer.empty[String]
 
+    // mark 遍历每个日志目录以尝试读取元数据
     for (logDir <- logDirs) {
+      // mark 构建元数据文件的路径
       val brokerCheckpointFile = new File(logDir, "meta.properties")
+      // mark 创建用于读取元数据的检查点对象 BrokerMetadataCheckpoint 是对File的包装提供了线程安全的读写方法
       val brokerCheckpoint = new BrokerMetadataCheckpoint(brokerCheckpointFile)
 
       try {
+        // mark 尝试读取元数据，并根据情况将其添加到映射中或在忽略缺失时跳过
         brokerCheckpoint.read() match {
           case Some(properties) =>
             brokerMetadataMap += logDir -> properties
@@ -180,22 +199,28 @@ object BrokerMetadataCheckpoint extends Logging {
             }
         }
       } catch {
+        // mark 捕获IO异常，并将相应目录标记为离线
         case e: IOException =>
           offlineDirs += logDir
           error(s"Failed to read $brokerCheckpointFile", e)
       }
     }
 
+    // mark 根据是否找到元数据，返回不同的结果 RawMetaProperties是元数据的抽象 其中包括记录了meta.properties文件中的version，broker.id，cluster.id
     if (brokerMetadataMap.isEmpty) {
       (new RawMetaProperties(), offlineDirs)
     } else {
+      // 在KRaft模式下，检查不同目录中的元数据版本是否一致
       // KRaft mode has to support handling both meta.properties versions 0 and 1 and has to
       // reconcile have multiple versions in different directories.
+      // mark numDistinctMetaProperties保存元数据版本不同目录的数量
+      // mark 是将brokerMetadataMap.values进行去重 kafka不同目录下的meta.properties需要保持一致否则下面会抛出异常
       val numDistinctMetaProperties = if (kraftMode) {
         brokerMetadataMap.values.map(props => MetaProperties.parse(new RawMetaProperties(props))).toSet.size
       } else {
         brokerMetadataMap.values.toSet.size
       }
+      // mark 如果 numDistinctMetaProperties > 1 说明不同目录的元数据不一样 抛出异常
       if (numDistinctMetaProperties > 1) {
         val builder = new StringBuilder
 
@@ -208,10 +233,12 @@ object BrokerMetadataCheckpoint extends Logging {
         )
       }
 
+      // mark map中的head返回第一个键值对的元祖，元祖中的第一个 第二个值可以使用 _1,_2直接获取
       val rawProps = new RawMetaProperties(brokerMetadataMap.head._2)
       (rawProps, offlineDirs)
     }
   }
+
 }
 
 /**
@@ -241,21 +268,36 @@ class BrokerMetadataCheckpoint(val file: File) extends Logging {
     }
   }
 
+  /**
+   * 根据文件路径读取并返回属性文件。
+   * 若文件不存在或在读取过程中发生错误，将返回None或抛出异常。
+   * 在读取前尝试删除任何存在的临时文件，以保持文件系统的整洁。
+   *
+   * @return 文件存在且读取成功时返回Some(Properties)，否则返回None。
+   * @throws Exception 当文件读取过程中发生错误时抛出异常。
+   */
   def read(): Option[Properties] = {
-    Files.deleteIfExists(new File(file.getPath + ".tmp").toPath) // try to delete any existing temp files for cleanliness
+    // mark 如果存在临时文件中则删除
+    Files.deleteIfExists(new File(file.getPath + ".tmp").toPath) // 尝试删除任何存在的临时文件以保持整洁
 
+    // mark 获取文件的绝对路径
     val absolutePath = file.getAbsolutePath
+    // mark 使用锁来确保在读取文件时的线程安全性
     lock synchronized {
       try {
+        // mark loadProps 可以读取properties文件
         Some(Utils.loadProps(absolutePath))
       } catch {
         case _: NoSuchFileException =>
-          warn(s"No meta.properties file under dir $absolutePath")
+          // 如果文件不存在，发出警告并返回None
+          warn(s"在目录 $absolutePath 下未找到meta.properties文件")
           None
         case e: Exception =>
-          error(s"Failed to read meta.properties file under dir $absolutePath", e)
+          // 其他异常发生时，记录错误并抛出异常
+          error(s"未能读取目录 $absolutePath 下的meta.properties文件", e)
           throw e
       }
     }
   }
+
 }
