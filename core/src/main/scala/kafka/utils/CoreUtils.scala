@@ -108,18 +108,22 @@ object CoreUtils {
   }
 
   /**
+   * mark 将mbean注册到mbeanServer中
    * Register the given mbean with the platform mbean server,
    * unregistering any mbean that was there before. Note,
    * this method will not throw an exception if the registration
    * fails (since there is nothing you can do and it isn't fatal),
    * instead it just returns false indicating the registration failed.
+   *
    * @param mbean The object to register as an mbean
    * @param name The name to register this mbean with
    * @return true if the registration succeeded
    */
   def registerMBean(mbean: Object, name: String): Boolean = {
     try {
+      // mark 通过工厂类获取MBeanServer，用来做MBean的容器
       val mbs = ManagementFactory.getPlatformMBeanServer()
+      // mark 注册Mbean
       mbs synchronized {
         val objName = new ObjectName(name)
         if (mbs.isRegistered(objName))
@@ -319,6 +323,11 @@ object CoreUtils {
     endPoints
   }
 
+  /**
+   * 生成一个 UUID 并将其编码为 Base64 格式的字符串。
+   *
+   * @return 编码为 Base64 格式的不带填充的 UUID 字符串
+   */
   def generateUuidAsBase64(): String = {
     val uuid = UUID.randomUUID()
     Base64.getUrlEncoder.withoutPadding.encodeToString(getBytesFromUuid(uuid))

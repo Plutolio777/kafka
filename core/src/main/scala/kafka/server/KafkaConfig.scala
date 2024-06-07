@@ -318,24 +318,123 @@ object KafkaConfig {
   }
 
   /** ********* Zookeeper Configuration ***********/
+
+  /**
+   * zookeeper.connect
+   * 用于指定 Kafka 集群中的 ZooKeeper 的连接字符串。
+   */
   val ZkConnectProp = "zookeeper.connect"
+  /**
+   * zookeeper.session.timeout.ms
+   * 用于指定与 ZooKeeper 会话的超时时间。如果超过这格式件没有收到心跳则超时
+   */
   val ZkSessionTimeoutMsProp = "zookeeper.session.timeout.ms"
+  /**
+   * zookeeper.connection.timeout.ms
+   * 用于指定客户端与 ZooKeeper 服务器建立连接时的超时时间（以毫秒为单位）。
+   * */
   val ZkConnectionTimeoutMsProp = "zookeeper.connection.timeout.ms"
+  /**
+   * zookeeper.connect 用于指定 Kafka 集群中的 ZooKeeper 的连接字符串。
+   * Apache Kafka 中与 ZooKeeper 访问控制列表（ACL）相关的一个配置项。
+   * ACL 是 ZooKeeper 中用于控制访问权限的机制，通过设置 ACL 可以控制哪个用户或客户端对某个节点（znode）具有读取、写入、创建、删除等权限。
+   */
   val ZkEnableSecureAclsProp = "zookeeper.set.acl"
+  /**
+   * zookeeper.max.in.flight.requests
+   * 用于限制客户端与 ZooKeeper 服务器之间在同一时间内未完成的请求数目。这有助于防止客户端发送过多的并发请求，从而可能导致 ZooKeeper 服务器过载。
+   */
   val ZkMaxInFlightRequestsProp = "zookeeper.max.in.flight.requests"
+  /**
+   * zookeeper.ssl.client.enable
+   * 用于启用客户端与 ZooKeeper 之间的 SSL/TLS 加密连接。
+   * 以下为相关配置：
+   * zookeeper.ssl.keystore.location：密钥库文件的位置。
+   * zookeeper.ssl.keystore.password：密钥库的密码。
+   * zookeeper.ssl.key.password：密钥的密码。
+   * zookeeper.ssl.truststore.location：信任库文件的位置。
+   * zookeeper.ssl.truststore.password：信任库的密码。
+   */
   val ZkSslClientEnableProp = "zookeeper.ssl.client.enable"
+  /**
+   * zookeeper.clientCnxnSocket
+   * 用于指定客户端连接套接字的实现类。这个配置项允许用户自定义或选择不同的客户端连接方式，以满足特定的网络需求或性能要求。
+   */
   val ZkClientCnxnSocketProp = "zookeeper.clientCnxnSocket"
+  /**
+   * zookeeper.ssl.keystore.location
+   * 用于指定keystore地址
+   * 无默认值
+   */
   val ZkSslKeyStoreLocationProp = "zookeeper.ssl.keystore.location"
+  /**
+   * zookeeper.ssl.keystore.password
+   * 用于指定keystore的密码
+   * 无默认值
+   */
   val ZkSslKeyStorePasswordProp = "zookeeper.ssl.keystore.password"
+  /**
+   * zookeeper.ssl.keystore.type
+   * 用于指定密钥库的类型。常见的密钥库类型包括 JKS（Java KeyStore）和 PKCS12。
+   * 该参数的默认值是 JKS。
+   */
   val ZkSslKeyStoreTypeProp = "zookeeper.ssl.keystore.type"
+  /**
+   * zookeeper.ssl.truststore.location
+   * 用于指定truststore地址
+   * 无默认值
+   */
   val ZkSslTrustStoreLocationProp = "zookeeper.ssl.truststore.location"
+  /**
+   * zookeeper.ssl.truststore.password
+   * 用于指定truststore密码
+   * 无默认值
+   */
   val ZkSslTrustStorePasswordProp = "zookeeper.ssl.truststore.password"
+  /**
+   * zookeeper.ssl.truststore.password
+   * 用于指定密钥库的类型。常见的密钥库类型包括 JKS（Java KeyStore）和 PKCS12。
+   * 该参数的默认值是 JKS。
+   */
   val ZkSslTrustStoreTypeProp = "zookeeper.ssl.truststore.type"
+  /**
+   * zookeeper.ssl.protocol
+   * 用于指定客户端与 ZooKeeper 之间使用的 SSL/TLS 协议版本。
+   * 该参数的默认值是 TLSv1.2。
+   */
   val ZkSslProtocolProp = "zookeeper.ssl.protocol"
+  /**
+   * zookeeper.ssl.protocol
+   * 指定 Kafka 客户端与 ZooKeeper 之间启用的 SSL/TLS 协议版本列表。用于设置允许使用的多个协议版本。
+   * 该参数的默认值是 TLSv1.2。
+   */
   val ZkSslEnabledProtocolsProp = "zookeeper.ssl.enabled.protocols"
+  /**
+   * zookeeper.ssl.cipher.suites
+   * 用于指定客户端与 ZooKeeper 之间启用的 SSL/TLS 密码套件列表。
+   * 密码套件定义了加密算法、密钥交换算法和消息认证码（MAC）算法的组合，用于保护通信数据的机密性和完整性。
+   * 无默认值
+   */
   val ZkSslCipherSuitesProp = "zookeeper.ssl.cipher.suites"
+  /**
+   * zookeeper.ssl.endpoint.identification.algorithm
+   * 端点识别通常用于验证服务器的身份，以防止中间人攻击。
+   * 用于指定在 SSL/TLS 连接中进行端点识别时使用的算法。
+   * 该参数的默认值是 HTTPS
+   */
   val ZkSslEndpointIdentificationAlgorithmProp = "zookeeper.ssl.endpoint.identification.algorithm"
+  /**
+   * zookeeper.ssl.crl.enable
+   * 用于启用或禁用 SSL/TLS 连接中的证书吊销列表（CRL）检查。
+   * 证书吊销列表用于列出已被吊销的证书，以防止使用这些证书进行通信。
+   * 该参数的默认值是 false
+   */
   val ZkSslCrlEnableProp = "zookeeper.ssl.crl.enable"
+  /**
+   * zookeeper.ssl.ocsp.enable
+   * 用于启用或禁用 SSL/TLS 连接中的在线证书状态协议（OCSP）检查。OCSP 用于实时验证证书的状态，以确定其是否被吊销。
+   * 该参数的默认值是 false
+   */
   val ZkSslOcspEnableProp = "zookeeper.ssl.ocsp.enable"
 
   // a map from the Kafka config to the corresponding ZooKeeper Java system property
@@ -379,16 +478,42 @@ object KafkaConfig {
       zooKeeperClientProperty(zkClientConfig, ZkSslKeyStoreLocationProp).isDefined
   }
 
-  /** ********* General Configuration ***********/
+
+  /**
+   * broker.id.generation.enable
+   * 用于控制是否启用自动生成 broker.id 的功能。
+   * 默然值 false
+   */
   val BrokerIdGenerationEnableProp = "broker.id.generation.enable"
+  /**
+   * reserved.broker.max.id
+   * 用于指定保留的 broker ID 的最大值。这个参数用于防止自动生成的 broker ID 与用户手动分配的 broker ID 冲突。
+   * 默然值 1000
+   */
   val MaxReservedBrokerIdProp = "reserved.broker.max.id"
+  /**
+   * <p>broker.id</p>
+   * <p>用于唯一标识每个 Kafka broker（服务器）在集群中的身份。每个 broker 必须有一个唯一的 broker.id，以便 Kafka 能够正确地管理和协调集群中的所有 broker。</p>
+   * <p>默认值是 -1，表示自动生成 broker.id。</p>
+   */
   val BrokerIdProp = "broker.id"
   val MessageMaxBytesProp = "message.max.bytes"
   val NumNetworkThreadsProp = "num.network.threads"
   val NumIoThreadsProp = "num.io.threads"
   val BackgroundThreadsProp = "background.threads"
   val NumReplicaAlterLogDirsThreadsProp = "num.replica.alter.log.dirs.threads"
+  /**
+   * <p>broker.id</p>
+   * <p>用于控制在处理请求之前，I/O 线程允许的最大请求队列数量。这个参数对管理 Kafka broker 的内存使用和性能有重要影响。</p>
+   * <p>默认值 500</p>
+   */
   val QueuedMaxRequestsProp = "queued.max.requests"
+
+  /**
+   * <p>broker.id</p>
+   * <p>用于限制在内存中排队的请求总字节数。当达到此限制时，不会读取更多的请求。这有助于防止由于请求量过大而导致的内存溢出（Out of Memory，OOM）问题。</p>
+   * <p>默认值 -1</p>
+   */
   val QueuedMaxBytesProp = "queued.max.request.bytes"
 
   val RequestTimeoutMsProp = CommonClientConfigs.REQUEST_TIMEOUT_MS_CONFIG
@@ -399,9 +524,31 @@ object KafkaConfig {
 
   /** KRaft mode configs */
   val ProcessRolesProp = "process.roles"
+  /**
+   * <h1>initial.broker.registration.timeout.ms</h1>
+   * <p>用于指定在初次注册到控制器仲裁（controller quorum）时，等待声明失败并退出 broker 进程的最大时间（以毫秒为单位）。</p>
+   * <p>这个参数在确保 broker 能够及时注册并参与集群协调时起到了关键作用。</p>
+   * <p>默认值是 60000 </p>
+   */
   val InitialBrokerRegistrationTimeoutMsProp = "initial.broker.registration.timeout.ms"
+  /**
+   * <h1>broker.heartbeat.interval.ms</h1>
+   * <p>用于指定 Kafka broker 向集群控制器（controller）发送心跳的间隔时间（以毫秒为单位）。</p>
+   * <p>这个参数帮助控制器跟踪每个 broker 的健康状态，确保集群的稳定运行。</p>
+   * <p>默认值是 2000 </p>
+   */
   val BrokerHeartbeatIntervalMsProp = "broker.heartbeat.interval.ms"
+  /**
+   * <h1>broker.heartbeat.interval.ms</h1>
+   * <p>用于指定在 Kafka 使用 KRaft 模式时，如果控制器未收到 broker 的心跳请求，认为该 broker 不再存活的时间间隔（以毫秒为单位）。</p>
+   * <p>默认值是 2000 </p>
+   */
   val BrokerSessionTimeoutMsProp = "broker.session.timeout.ms"
+  /**
+   * <h1>broker.id</h1>
+   * <p>在 Kafka 新引入的 Raft 协议中，node.id 用于标识 Raft 集群中的每个节点。</p>
+   * <p>默认值是 -1，表示自动生成 broker.id。</p>
+   */
   val NodeIdProp = "node.id"
   val MetadataLogDirProp = "metadata.log.dir"
   val MetadataSnapshotMaxNewRecordBytesProp = "metadata.log.max.record.bytes.between.snapshots"
@@ -417,6 +564,13 @@ object KafkaConfig {
   val MetadataMaxIdleIntervalMsProp = "metadata.max.idle.interval.ms"
 
   /** ZK to KRaft Migration configs */
+
+  /**
+   * <h1>zookeeper.metadata.migration.enable</h1>
+   * <p>用于在将 Kafka 集群从基于 ZooKeeper 的元数据管理迁移到 KRaft（Kafka Raft）模式时启用元数据迁移。</p>
+   * <p>启用此配置后，Kafka 将开始将 ZooKeeper 中存储的元数据迁移到 KRaft 控制器中管理。</p>
+   * <p>默认值 false</p>
+   */
   val MigrationEnabledProp = "zookeeper.metadata.migration.enable"
 
   /************* Authorizer Configuration ***********/
@@ -589,7 +743,20 @@ object KafkaConfig {
   val AutoIncludeJmxReporterProp: String = CommonClientConfigs.AUTO_INCLUDE_JMX_REPORTER_CONFIG
 
   /** ********* Kafka Yammer Metrics Reporters Configuration ***********/
+
+  /**
+   * <h1>kafka.metrics.reporters</h1>
+   * <p>用于指定一组类，这些类用于收集和报告 Kafka 集群的运行指标。</p>
+   * <p>通过配置这个参数，Kafka 可以将各种性能和健康指标发送到不同的监控系统，如 JMX、Prometheus 或其他自定义报告系统。</p>
+   * <p>默认值是 null</p>
+   */
   val KafkaMetricsReporterClassesProp = "kafka.metrics.reporters"
+  /**
+   * <h1>kafka.metrics.reporters</h1>
+   * <p>用于指定 Kafka 指标（metrics）报告器的轮询间隔时间（以秒为单位）。</p>
+   * <p>此参数控制指标收集和报告的频率。</p>
+   * <p>默认值是 10</p>
+   */
   val KafkaMetricsPollingIntervalSecondsProp = "kafka.metrics.polling.interval.secs"
 
   /** ******** Common Security Configuration *************/
@@ -1569,7 +1736,7 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
   // The following captures any system properties impacting ZooKeeper TLS configuration
   // and defines the default values this instance will use if no explicit config is given.
   // We make it part of each instance rather than the object to facilitate testing.
-  // mark 这里对ZooKeeper TLS配置进行解析，并在配置缺省时给出对应的默认值
+  // mark 这里对ZooKeeper TLS配置进行解析，并在配置缺省时给出对应的默认值(从环境变量获取)
   // mark 创建了一个zookeeper配置对象 直接调用的原生API 这个里面会加载一些系统配置以及JVM相关配置
   private val zkClientConfigViaSystemProperties = new ZKClientConfig()
 
@@ -1608,6 +1775,7 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
   // mark zookeeper的最大请求数
   val zkMaxInFlightRequests: Int = getInt(KafkaConfig.ZkMaxInFlightRequestsProp)
 
+  // mark 远程日志系统相关配置 kafka提供了将日志存储到其他远程系统比如S3，数据库 的能力可以通过这里配置
   private val _remoteLogManagerConfig = new RemoteLogManagerConfig(this)
   def remoteLogManagerConfig = _remoteLogManagerConfig
 
@@ -1656,7 +1824,7 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
 
   // mark zookeeper ssl连接相关配置
   val zkSslClientEnable = zkBooleanConfigOrSystemPropertyWithDefaultValue(KafkaConfig.ZkSslClientEnableProp)
-  // mark 以下的配置都用Option进行了包装 防止空指针的问题
+  // mark 以下的配置都是与zk TLS加密相关的配置，都用Option进行了包装 防止空指针的问题
   val zkClientCnxnSocketClassName = zkOptionalStringConfigOrSystemProperty(KafkaConfig.ZkClientCnxnSocketProp)
   val zkSslKeyStoreLocation = zkOptionalStringConfigOrSystemProperty(KafkaConfig.ZkSslKeyStoreLocationProp)
   val zkSslKeyStorePassword = zkPasswordConfigOrSystemProperty(KafkaConfig.ZkSslKeyStorePasswordProp)
@@ -1686,6 +1854,8 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
   val ZkSslCrlEnable = zkBooleanConfigOrSystemPropertyWithDefaultValue(KafkaConfig.ZkSslCrlEnableProp)
   val ZkSslOcspEnable = zkBooleanConfigOrSystemPropertyWithDefaultValue(KafkaConfig.ZkSslOcspEnableProp)
   /** ********* General Configuration ***********/
+  // mark 以下是kafka集群相关的配置 包括zookeeper集群模式以及最新的kraft集群模式
+
   // mark broker.id.generation.enable是否开启自动生成broker id 默认不开启
   val brokerIdGenerationEnable: Boolean = getBoolean(KafkaConfig.BrokerIdGenerationEnableProp)
   // mark reserved.broker.max.id 指定 Kafka 集群中自动分配的 broker ID 的最大值。
@@ -1696,7 +1866,7 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
   val nodeId: Int = getInt(KafkaConfig.NodeIdProp)
   // mark initial.broker.registration.timeout.ms 它用于控制在 Kafka 集群启动时，Kafka Broker 等待注册成功的超时时间。
   val initialRegistrationTimeoutMs: Int = getInt(KafkaConfig.InitialBrokerRegistrationTimeoutMsProp)
-  // mark broker.heartbeat.interval.ms 想kafka controller发送心跳的时间间隔
+  // mark broker.heartbeat.interval.ms 向kafka controller发送心跳的时间间隔
   val brokerHeartbeatIntervalMs: Int = getInt(KafkaConfig.BrokerHeartbeatIntervalMsProp)
   // mark broker.session.timeout.ms用于控制Broker与Controller的session会话超时时间
   val brokerSessionTimeoutMs: Int = getInt(KafkaConfig.BrokerSessionTimeoutMsProp)
@@ -1705,13 +1875,14 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
   // mark 因为在zookeeper中是不需要自己管理集群角色的 都是交给zookeeper去做
   def requiresZookeeper: Boolean = processRoles.isEmpty
 
-  // mark 如果角色集合不为空则启动自我管理仲裁机制
+  // mark 如果角色集合不为空则启动自我管理仲裁机制（不依赖zookeeper采用Kraft协议）
   def usesSelfManagedQuorum: Boolean = processRoles.nonEmpty
 
-  // mark 是否启用 Kafka 从 ZooKeeper 向自管理元数据模式（如 KRaft）迁移的功能。
+  // mark 是否启用 Kafka 从 ZooKeeper --> KRaft 迁移的功能。
   val migrationEnabled: Boolean = getBoolean(KafkaConfig.MigrationEnabledProp)
 
   /**
+   * mark 在kraft模式中解析kafka broker的角色
    * 解析配置中指定的process.roles属性，并返回一个去重后的角色集合。
    * 这个方法首先将配置中的process.roles属性转换为Scala的List，然后映射到对应的ProcessRole枚举值。
    * 如果遇到未知的角色名称，将抛出ConfigException异常。

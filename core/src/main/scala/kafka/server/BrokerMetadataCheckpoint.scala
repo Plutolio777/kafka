@@ -209,7 +209,8 @@ object BrokerMetadataCheckpoint extends Logging {
     // mark 根据是否找到元数据，返回不同的结果 RawMetaProperties是元数据的抽象 其中包括记录了meta.properties文件中的version，broker.id，cluster.id
     if (brokerMetadataMap.isEmpty) {
       (new RawMetaProperties(), offlineDirs)
-    } else {
+    }
+    else {
       // 在KRaft模式下，检查不同目录中的元数据版本是否一致
       // KRaft mode has to support handling both meta.properties versions 0 and 1 and has to
       // reconcile have multiple versions in different directories.

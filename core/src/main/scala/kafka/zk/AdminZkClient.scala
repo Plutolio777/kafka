@@ -492,11 +492,12 @@ class AdminZkClient(zkClient: KafkaZkClient) extends Logging {
   }
 
   /**
-   * Read the entity (topic, broker, client, user, <user, client> or <ip>) config (if any) from zk
-   * sanitizedEntityName is <topic>, <broker>, <client-id>, <user>, <user>/clients/<client-id> or <ip>.
-   * @param rootEntityType entityType for which configs are being fetched
-   * @param sanitizedEntityName entityName of the entityType
-   * @return The successfully gathered configs
+   * 从 ZooKeeper 中读取实体（主题、代理、客户端、用户、<用户,客户端> 或 <IP>）的配置（如果有）。
+   * sanitizedEntityName 可以是 <topic>, <broker>, <client-id>, <user>, <user>/clients/<client-id> 或 <ip>。
+   *
+   * @param rootEntityType      要获取配置的实体类型
+   * @param sanitizedEntityName 实体类型的实体名称
+   * @return 成功获取到的配置
    */
   def fetchEntityConfig(rootEntityType: String, sanitizedEntityName: String): Properties = {
     zkClient.getEntityConfigs(rootEntityType, sanitizedEntityName)

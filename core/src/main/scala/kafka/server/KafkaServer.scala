@@ -99,14 +99,22 @@ class KafkaServer(
   enableForwarding: Boolean = false
 ) extends KafkaBroker with Server {
 
+  // mark 标志kafka server已经启动完成
   private val startupComplete = new AtomicBoolean(false)
+  // mark 标志kafka server正在关闭
   private val isShuttingDown = new AtomicBoolean(false)
+  // mark 标志kafka server正在启动
   private val isStartingUp = new AtomicBoolean(false)
 
+  // mark 初始化的时候 broker状态为 未运行（该状态表示kafka首次启动）
   @volatile private var _brokerState: BrokerState = BrokerState.NOT_RUNNING
+
+  // mark 等待一个线程完成并调用 countDown()
   private var shutdownLatch = new CountDownLatch(1)
+
   private var logContext: LogContext = _
 
+  // mark 处理指标报告器的相关配置
   private val kafkaMetricsReporters: Seq[KafkaMetricsReporter] =
     KafkaMetricsReporter.startReporters(VerifiableProperties(config.originals))
   var kafkaYammerMetrics: KafkaYammerMetrics = _
@@ -118,6 +126,7 @@ class KafkaServer(
   var controlPlaneRequestProcessor: KafkaApis = _
 
   var authorizer: Option[Authorizer] = None
+  // mark 处理socket相关
   @volatile var socketServer: SocketServer = _
   var dataPlaneRequestHandlerPool: KafkaRequestHandlerPool = _
   var controlPlaneRequestHandlerPool: KafkaRequestHandlerPool = _
@@ -207,7 +216,7 @@ class KafkaServer(
       // mark 如果kafka 已经启动，则直接返回不处理任何
       if (startupComplete.get)
         return
-      // mark 设置 kafka 状态为已经启动
+      // mark 设置 kafka 状态为已经启动（cas修改）
       val canStartup = isStartingUp.compareAndSet(false, true)
       if (canStartup) {
         _brokerState = BrokerState.STARTING
@@ -215,15 +224,21 @@ class KafkaServer(
         /* setup zookeeper */
         // mark 初始化zookeeper client 创建一些必要的路径
         initZkClient(time)
+        // mark AdminZkClient 是 Kafka 中用于管理和操作 ZooKeeper 的一个工具类，通常在 Kafka 的管理工具或测试工具中使用。
+        // mark 它提供了一些方法，可以方便地在 ZooKeeper 中进行一些常见的 Kafka 管理操作，比如创建、删除和查询 Kafka 主题等。
+        // mark adminZkClient.createTopic(topicName, partitions, replication, topicConfig);
+        // mark adminZkClient.deleteTopic(topicName);
+        // mark 因为kafka有一些配置是一样的但是topic和broker又独立的配置 ZkConfigRepository 这个就是对上层的封装
+        // mark ZkConfigRepository可以提供是修改topic层面的配置还是broker层面的配置
         configRepository = new ZkConfigRepository(new AdminZkClient(zkClient))
 
         /* Get or create cluster_id */
-        // mark 获取或者生成集群ID（uuid的base64编码）
+        // mark 获取(如果已经存在)或者生成集群ID（uuid的base64编码）
         _clusterId = getOrGenerateClusterId(zkClient)
         info(s"Cluster ID = $clusterId")
 
         /* load metadata */
-        // mark 加载每个logs文件夹中的所有元数据文件 meta.properties
+        // mark 加载每个logs文件夹中的所有元数据文件 meta.properties（确保集群元数据文件正确且都保持一致 如果不一致会排除异常）
         // mark preloadedBrokerMetadataCheckpoint 为meta.properties文件的抽象
         // mark initialOfflineDirs 为发生IO异常的所有数据目录集合
         val (preloadedBrokerMetadataCheckpoint, initialOfflineDirs) =
@@ -236,13 +251,17 @@ class KafkaServer(
         }
 
         /* check cluster id */
+        // 1. mark preloadedBrokerMetadataCheckpoint.clusterId.isDefined 不为空
+        // 2. mark meta.properties和zookeeper中的集群id不相等则抛出异常
         if (preloadedBrokerMetadataCheckpoint.clusterId.isDefined && preloadedBrokerMetadataCheckpoint.clusterId.get != clusterId)
           throw new InconsistentClusterIdException(
             s"The Cluster ID $clusterId doesn't match stored clusterId ${preloadedBrokerMetadataCheckpoint.clusterId} in meta.properties. " +
             s"The broker is trying to join the wrong cluster. Configured zookeeper.connect may be wrong.")
 
         /* generate brokerId */
+        // mark 获取或者生成Broker ID
         config.brokerId = getOrGenerateBrokerId(preloadedBrokerMetadataCheckpoint)
+        // mark LogContext保存了打印日志需要带的前缀
         logContext = new LogContext(s"[KafkaServer id=${config.brokerId}] ")
         this.logIdent = logContext.logPrefix
 
@@ -599,11 +618,22 @@ class KafkaServer(
 
   private def initZkClient(time: Time): Unit = {
     info(s"Connecting to zookeeper on ${config.zkConnect}")
+    // mark 创建ZK客户端
     _zkClient = KafkaZkClient.createZkClient("Kafka server", time, config, zkClientConfig)
+    // mark 创建kafka需要的节点
     _zkClient.createTopLevelPaths()
   }
 
+  /**
+   * 获取或生成集群 ID。
+   * 如果集群 ID 存在，则返回该集群 ID；如果不存在，则生成一个新的集群 ID 并创建节点。
+   *
+   * @param zkClient Kafka 的 ZooKeeper 客户端
+   * @return 集群 ID 字符串
+   */
   private def getOrGenerateClusterId(zkClient: KafkaZkClient): String = {
+    // mark 首先尝试获取现有的集群 ID
+    // mark 如果集群 ID 不存在，则生成一个新的 UUID 并调用 zkClient.createOrGetClusterId 创建节点
     zkClient.getClusterId.getOrElse(zkClient.createOrGetClusterId(CoreUtils.generateUuidAsBase64()))
   }
 
@@ -970,38 +1000,50 @@ class KafkaServer(
   }
 
   /**
-   * Generates new brokerId if enabled or reads from meta.properties based on following conditions
+   * mark brokerMetadata 是meta.properties中的broker id
+   * 根据以下条件生成新的 brokerId 或从 meta.properties 中读取 brokerId：
    * <ol>
-   * <li> config has no broker.id provided and broker id generation is enabled, generates a broker.id based on Zookeeper's sequence
-   * <li> config has broker.id and meta.properties contains broker.id if they don't match throws InconsistentBrokerIdException
-   * <li> config has broker.id and there is no meta.properties file, creates new meta.properties and stores broker.id
-   * <ol>
+   * <li> 如果配置中没有提供 broker.id 且启用了 broker id 生成，则根据 Zookeeper 的序列生成一个 broker.id。
+   * <li> 如果配置中有 broker.id 且 meta.properties 中包含 broker.id，但它们不匹配，则抛出 InconsistentBrokerIdException。
+   * <li> 如果配置中有 broker.id 且没有 meta.properties 文件，则创建新的 meta.properties 并存储 broker.id。
+   * </ol>
    *
-   * @return The brokerId.
+   * @param brokerMetadata 原始元数据属性
+   * @return brokerId
+   * @throws InconsistentBrokerIdException 如果配置的 broker.id 与存储在 meta.properties 中的 broker.id 不匹配
    */
   private def getOrGenerateBrokerId(brokerMetadata: RawMetaProperties): Int = {
+    // mark 首先获取配置文件中的broker id
     val brokerId = config.brokerId
 
+    // mark 元数据中的broker id 如果跟配置文件中的不一致的话抛出异常
     if (brokerId >= 0 && brokerMetadata.brokerId.exists(_ != brokerId))
       throw new InconsistentBrokerIdException(
         s"Configured broker.id $brokerId doesn't match stored broker.id ${brokerMetadata.brokerId} in meta.properties. " +
           s"If you moved your data, make sure your configured broker.id matches. " +
           s"If you intend to create a new broker, you should remove all data in your data directories (log.dirs).")
+    // mark 如果元数据中有broker id则使用元数据中定义的id
     else if (brokerMetadata.brokerId.isDefined)
       brokerMetadata.brokerId.get
-    else if (brokerId < 0 && config.brokerIdGenerationEnable) // generate a new brokerId from Zookeeper
+    // mark 如果broker id小于0则进入自动生成id的流程
+    else if (brokerId < 0 && config.brokerIdGenerationEnable) { // generate a new brokerId from Zookeeper
+      // mark 借助zookeeper生成broker id
       generateBrokerId()
-    else
+    } else
       brokerId
   }
 
   /**
-    * Return a sequence id generated by updating the broker sequence id path in ZK.
-    * Users can provide brokerId in the config. To avoid conflicts between ZK generated
-    * sequence id and configured brokerId, we increment the generated sequence id by KafkaConfig.MaxReservedBrokerId.
-    */
+   * 通过更新 Zookeeper 中的 broker 序列 ID 路径来返回一个生成的序列 ID。
+   * 用户可以在配置中提供 brokerId。为了避免 Zookeeper 生成的序列 ID 与配置的 brokerId 之间的冲突，
+   * 我们通过 KafkaConfig.MaxReservedBrokerId 增加生成的序列 ID。
+   *
+   * @return 生成的 brokerId
+   * @throws GenerateBrokerIdException 如果生成 broker.id 失败，则抛出此异常
+   */
   private def generateBrokerId(): Int = {
     try {
+      // mark config.maxReservedBrokerId 取的是这个值 reserved.broker.max.id 自动生成ID的起始偏移量
       zkClient.generateBrokerSequenceId() + config.maxReservedBrokerId
     } catch {
       case e: Exception =>

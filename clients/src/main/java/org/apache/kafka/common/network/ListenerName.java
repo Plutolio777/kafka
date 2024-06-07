@@ -21,19 +21,31 @@ import org.apache.kafka.common.security.auth.SecurityProtocol;
 import java.util.Locale;
 import java.util.Objects;
 
+/**
+ * 此最终类表示监听器名称，提供了根据安全协议或给定值创建实例的方法，
+ * 以及处理和返回相应配置前缀的方法。
+ */
 public final class ListenerName {
 
     private static final String CONFIG_STATIC_PREFIX = "listener.name";
 
     /**
-     * Create an instance with the security protocol name as the value.
+     * 使用安全协议的名称创建ListenerName的实例。
+     *
+     * @param securityProtocol 安全协议，用于根据其名称创建ListenerName实例。
+     * @return 新建的ListenerName实例。
+     * 根据安全协议名称创建实例。
      */
     public static ListenerName forSecurityProtocol(SecurityProtocol securityProtocol) {
         return new ListenerName(securityProtocol.name);
     }
 
     /**
-     * Create an instance with the provided value converted to uppercase.
+     * 创建一个实例，其中提供的值会被转换为大写。
+     *
+     * @param value 用于创建ListenerName实例的字符串值，将会被转换成大写形式。
+     * @return 新建的ListenerName实例。
+     * 根据提供的值（转换为大写）创建实例。
      */
     public static ListenerName normalised(String value) {
         return new ListenerName(value.toUpperCase(Locale.ROOT));

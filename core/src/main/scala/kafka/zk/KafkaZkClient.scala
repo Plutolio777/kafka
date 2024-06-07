@@ -1662,13 +1662,16 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
   }
 
   /**
-    * Get the cluster id.
-    * @return optional cluster id in String.
-    */
+   * 获取集群 ID。
+   *
+   * @return 可选的集群 ID 字符串。
+   */
   def getClusterId: Option[String] = {
+    // mark 请求zk 获取/cluster/id下的数据
     val getDataRequest = GetDataRequest(ClusterIdZNode.path)
     val getDataResponse = retryRequestUntilConnected(getDataRequest)
     getDataResponse.resultCode match {
+      // mark 反序列化转换成集群ID
       case Code.OK => Some(ClusterIdZNode.fromJson(getDataResponse.data))
       case Code.NONODE => None
       case _ => throw getDataResponse.resultException.get
@@ -1731,31 +1734,44 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
   }
 
   /**
-    * Create the cluster Id. If the cluster id already exists, return the current cluster id.
-    * @return  cluster id
-    */
+   * 创建集群 ID。如果集群 ID 已存在，则返回当前集群 ID。
+   *
+   * @param proposedClusterId 提议的集群 ID
+   * @return 集群 ID
+   * @throws KafkaException 如果从 Zookeeper 获取集群 ID 失败，则抛出异常
+   */
   def createOrGetClusterId(proposedClusterId: String): String = {
     try {
+      // mark 尝试创建znode /cluster/id -> {"version":1,"id":集群id}
       createRecursive(ClusterIdZNode.path, ClusterIdZNode.toJson(proposedClusterId))
       proposedClusterId
     } catch {
+      // mark 如果节点已经存在着调用 getClusterId 方法获取集群ID 如果获取不到则报错
       case _: NodeExistsException => getClusterId.getOrElse(
         throw new KafkaException("Failed to get cluster id from Zookeeper. This can happen if /cluster/id is deleted from Zookeeper."))
     }
   }
 
   /**
-    * Generate a broker id by updating the broker sequence id path in ZK and return the version of the path.
-    * The version is incremented by one on every update starting from 1.
-    * @return sequence number as the broker id
-    */
+   * mark 借助zookeeper来自动生成broker id
+   * 通过更新 Zookeeper 中的 broker 序列 ID 路径来生成 broker id，并返回该路径的版本。
+   * 版本号从 1 开始，每次更新时增加 1。
+   *
+   * @return 序列号作为 broker id
+   */
   def generateBrokerSequenceId(): Int = {
+    // mark 向 /brokers/seqid 写入数据 ZkVersion.MatchAnyVersion 为版本号（-1）匹配任何版本号
+    // mark 实际上kafka使用zookeeper中节点的数据版本号来原子性的生成broker id的
+    // mark 他向 /brokers/seqid 写入一个空数据 然后获取自增的版本号作为broker id
     val setDataRequest = SetDataRequest(BrokerSequenceIdZNode.path, Array.empty[Byte], ZkVersion.MatchAnyVersion)
     val setDataResponse = retryRequestUntilConnected(setDataRequest)
     setDataResponse.resultCode match {
+      // mark 如果设置成功返回数据版本号
       case Code.OK => setDataResponse.stat.getVersion
+      // mark 如果节点不存在则调用 createRecursive方法创建节点
+      // mark 然后再次执行 generateBrokerSequenceId获取版本号
       case Code.NONODE =>
-        // maker sure the path exists
+        // 确保路径存在
         createRecursive(BrokerSequenceIdZNode.path, Array.empty[Byte], throwIfPathExists = false)
         generateBrokerSequenceId()
       case _ => throw setDataResponse.resultException.get
@@ -1766,6 +1782,7 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
     * Pre-create top level paths in ZK if needed.
     */
   def createTopLevelPaths(): Unit = {
+    // mark kafka需要的节点都放在 ZkData.PersistentZkPaths 中
     ZkData.PersistentZkPaths.foreach(makeSurePersistentPathExists(_))
   }
 
@@ -1774,6 +1791,7 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
     * @param path
     */
   def makeSurePersistentPathExists(path: String): Unit = {
+    // mark 递归创建 throwIfPathExists 表示节点存在不抛出异常
     createRecursive(path, data = null, throwIfPathExists = false)
   }
 
@@ -1843,17 +1861,37 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
     }
   }
 
-  private[kafka] def createRecursive(path: String, data: Array[Byte] = null, throwIfPathExists: Boolean = true) = {
+  /**
+   * 创建一个znode，如果父路径不存在则递归创建。
+   *
+   * @param path              znode的路径
+   * @param data              存储在znode中的数据，默认为null
+   * @param throwIfPathExists 如果为true，则在znode已存在时抛出异常，默认值为true
+   */
+  private[kafka] def createRecursive(path: String, data: Array[Byte] = null, throwIfPathExists: Boolean = true): Unit = {
 
+    /**
+     * 返回给定znode路径的父路径。
+     *
+     * @param path znode的路径
+     * @return 父路径
+     * @throws IllegalArgumentException 如果路径无效
+     */
     def parentPath(path: String): String = {
       val indexOfLastSlash = path.lastIndexOf("/")
       if (indexOfLastSlash == -1) throw new IllegalArgumentException(s"Invalid path ${path}")
       path.substring(0, indexOfLastSlash)
     }
 
+    /**
+     * 递归创建指定路径的父znode。
+     *
+     * @param path 要创建的znode路径
+     */
     def createRecursive0(path: String): Unit = {
       val createRequest = CreateRequest(path, null, defaultAcls(path), CreateMode.PERSISTENT)
       var createResponse = retryRequestUntilConnected(createRequest)
+      // mark 如果节点不存在则继续递归创建上级节点
       if (createResponse.resultCode == Code.NONODE) {
         createRecursive0(parentPath(path))
         createResponse = retryRequestUntilConnected(createRequest)
@@ -1865,19 +1903,22 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
       }
     }
 
+    // mark 这里创建的都是持久节点 CreateMode.PERSISTENT
     val createRequest = CreateRequest(path, data, defaultAcls(path), CreateMode.PERSISTENT)
     var createResponse = retryRequestUntilConnected(createRequest)
 
+    // mark 节点存在是否需要抛出异常 由throwIfPathExists控制默认值是false
     if (throwIfPathExists && createResponse.resultCode == Code.NODEEXISTS) {
       createResponse.maybeThrow()
     } else if (createResponse.resultCode == Code.NONODE) {
+      // mark 递归创建父节点
       createRecursive0(parentPath(path))
+      // mark 再次创建一下这个节点
       createResponse = retryRequestUntilConnected(createRequest)
       if (throwIfPathExists || createResponse.resultCode != Code.NODEEXISTS)
         createResponse.maybeThrow()
     } else if (createResponse.resultCode != Code.NODEEXISTS)
       createResponse.maybeThrow()
-
   }
 
   private def createTopicPartition(partitions: Seq[TopicPartition], expectedControllerEpochZkVersion: Int): Seq[CreateResponse] = {
@@ -2251,6 +2292,12 @@ object KafkaZkClient {
      *
      * See https://github.com/apache/zookeeper/pull/1129 for the details on why the behavior
      * changed in 3.6.0.
+     */
+    /**
+     * <h1>jute.maxbuffer</h1>
+     * <p>[[org.apache.zookeeper.common.ZKConfig.JUTE_MAXBUFFER]]</p>
+     * <p>用于设置客户端和服务器之间传输的最大数据包大小（以字节为单位）。这个参数主要用于防止过大的数据包导致内存问题或其他性能问题。</p>
+     * <p>默认值 4194304(4MB)</p>
      */
     if (zkClientConfig.getProperty(ZKConfig.JUTE_MAXBUFFER) == null)
       zkClientConfig.setProperty(ZKConfig.JUTE_MAXBUFFER, ((4096 * 1024).toString))

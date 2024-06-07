@@ -23,13 +23,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * The broker state.
- *
- * The numeric values used here are part of Kafka's public API.  They appear in metrics,
- * and are also sent over the wire in some cases.
- *
+ * 这个 BrokerState 枚举类定义了 Kafka broker 在其生命周期中的各种状态。每个状态代表 broker 在不同操作阶段的具体情况。以下是各个状态的详细说明：
  * The expected state transitions are:
- *
  * NOT_RUNNING
  *     ↓
  * STARTING
@@ -45,40 +40,37 @@ import java.util.Map;
 @InterfaceStability.Evolving
 public enum BrokerState {
     /**
-     * The state the broker is in when it first starts up.
+     * broker 初次启动时所处的状态。
      */
     NOT_RUNNING((byte) 0),
 
     /**
-     * The state the broker is in when it is catching up with cluster metadata.
+     * broker 启动并正在与集群元数据同步时的状态。
      */
     STARTING((byte) 1),
 
     /**
-     * The broker has caught up with cluster metadata, but has not yet
-     * been unfenced by the controller.
+     * broker 已经与集群元数据同步，但尚未被控制器解除隔离。
      */
     RECOVERY((byte) 2),
 
     /**
-     * The state the broker is in when it has registered at least once, and is
-     * accepting client requests.
+     * broker 至少已注册过一次并正在接受客户端请求时的状态。
      */
     RUNNING((byte) 3),
 
     /**
-     * The state the broker is in when it is attempting to perform a controlled
-     * shutdown.
+     * broker 尝试执行受控关闭时的状态。
      */
     PENDING_CONTROLLED_SHUTDOWN((byte) 6),
 
     /**
-     * The state the broker is in when it is shutting down.
+     * broker 正在关闭时的状态。
      */
     SHUTTING_DOWN((byte) 7),
 
     /**
-     * The broker is in an unknown state.
+     * broker 处于未知状态。
      */
     UNKNOWN((byte) 127);
 
@@ -96,6 +88,14 @@ public enum BrokerState {
         this.value = value;
     }
 
+    /**
+     * 根据字节值获取BrokerState枚举实例。
+     * 此方法通过字节值来反向映射到BrokerState枚举常量。它首先尝试从预定义的映射中获取对应的枚举常量。
+     * 如果字节值对应的枚举常量不存在，则返回UNKNOWN状态，表示该字节值代表的状态未知。
+     *
+     * @param value 字节值，代表某个Broker状态。
+     * @return 对应的BrokerState枚举实例，如果不存在则返回UNKNOWN。
+     */
     public static BrokerState fromValue(byte value) {
         BrokerState state = VALUES_TO_ENUMS.get(value);
         if (state == null) {

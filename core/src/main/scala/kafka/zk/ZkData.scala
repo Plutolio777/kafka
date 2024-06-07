@@ -786,13 +786,32 @@ object ClusterZNode {
 }
 
 object ClusterIdZNode {
+  /**
+   * 获取集群 ID 节点的路径。
+   *
+   * @return 集群 ID 节点的路径
+   */
   def path = s"${ClusterZNode.path}/id"
 
+  /**
+   * 将集群 ID 转换为 JSON 格式的字节数组。
+   * {"version":"1", "id":cluster id}
+   *
+   * @param id 集群 ID
+   * @return JSON 格式的字节数组
+   */
   def toJson(id: String): Array[Byte] = {
     Json.encodeAsBytes(Map("version" -> "1", "id" -> id).asJava)
   }
 
-  def fromJson(clusterIdJson:  Array[Byte]): String = {
+  /**
+   * 从 JSON 格式的字节数组中解析集群 ID。
+   *
+   * @param clusterIdJson JSON 格式的字节数组
+   * @return 解析出的集群 ID
+   * @throws KafkaException 如果解析失败则抛出异常
+   */
+  def fromJson(clusterIdJson: Array[Byte]): String = {
     Json.parseBytes(clusterIdJson).map(_.asJsonObject("id").to[String]).getOrElse {
       throw new KafkaException(s"Failed to parse the cluster id json $clusterIdJson")
     }
@@ -1092,17 +1111,26 @@ object ZkData {
     FeatureZNode.path) ++ ZkAclStore.securePaths
 
   // These are persistent ZK paths that should exist on kafka broker startup.
+  // mark Kafka中使用的一些重要的持久节点。Kafka中使用的一些重要的持久节点。 需要在broker启动的时候就创建好
   val PersistentZkPaths = Seq(
-    ConsumerPathZNode.path, // old consumer path
-    BrokerIdsZNode.path,
-    TopicsZNode.path,
-    ConfigEntityChangeNotificationZNode.path,
-    DeleteTopicsZNode.path,
-    BrokerSequenceIdZNode.path,
-    IsrChangeNotificationZNode.path,
-    ProducerIdBlockZNode.path,
-    LogDirEventNotificationZNode.path
+    ConsumerPathZNode.path, // mark 旧版消费者的路径，用于保存消费者组的相关信息。 /consumers
+    BrokerIdsZNode.path, // mark 保存所有Broker的ID信息。  /brokers/ids
+    TopicsZNode.path, // mark 保存所有主题（topic）的信息。 /brokers/topics
+    ConfigEntityChangeNotificationZNode.path, // mark 配置实体变更通知路径，当有配置变化时会通知相关节点。  /config/changes
+    DeleteTopicsZNode.path, // mark 保存需要删除的主题信息。 /admin/delete_topics
+    BrokerSequenceIdZNode.path, // mark Broker序列ID路径，用于管理Broker的顺序ID。  /brokers/seqid
+    IsrChangeNotificationZNode.path, // mark ISR（In-Sync Replica）变更通知路径，当ISR列表变化时会通知相关节点。  /isr_change_notification
+    ProducerIdBlockZNode.path, // mark Producer 生产者ID块路径，用于管理生产者ID。  /latest_producer_id_block
+    LogDirEventNotificationZNode.path // mark 日志目录事件通知路径，当日志目录发生变化时会通知相关节点。  /log_dir_event_notification
+    // mark 动态生成的配置实体路径，用于管理不同类型的配置。(比如某个topic的配置都在这里)：
+    // mark  /config/topics"
+    // mark  /clients/topics"
+    // mark  /users/topics"
+    // mark  /brokers/topics"
+    // mark  /ips/topics"
   ) ++ ConfigType.all.map(ConfigEntityTypeZNode.path)
+
+
 
   val SensitiveRootPaths = Seq(
     ConfigEntityTypeZNode.path(ConfigType.User),

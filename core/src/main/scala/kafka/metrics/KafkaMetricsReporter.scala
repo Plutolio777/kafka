@@ -55,25 +55,42 @@ object KafkaMetricsReporter {
   val ReporterStarted: AtomicBoolean = new AtomicBoolean(false)
   private var reporters: ArrayBuffer[KafkaMetricsReporter] = _
 
+  /**
+   * 初始化并返回KafkaMetricsReporter集合。(这里会实例化自定义的一些指标报告器)
+   *
+   * @param verifiableProps 这个是kafka配置集合
+   * @return 返回初始化的KafkaMetricsReporter序列。
+   */
   def startReporters(verifiableProps: VerifiableProperties): Seq[KafkaMetricsReporter] = {
+    // mark 同步块确保同时只有一个线程可以执行Reporter的启动逻辑
     ReporterStarted synchronized {
+      // mark 检查报告器是否已经启动，如果没有启动，则进行初始化
       if (!ReporterStarted.get()) {
+        // mark 初始化报告器列表
         reporters = ArrayBuffer[KafkaMetricsReporter]()
+        // mark 会读取 verifiableProps 中的 kafka.metrics.reporters 配置来生成对应的指标报告器
         val metricsConfig = new KafkaMetricsConfig(verifiableProps)
         if (metricsConfig.reporters.nonEmpty) {
+          // mark 遍历 kafka.metrics.reporters
           metricsConfig.reporters.foreach(reporterType => {
+            // mark 根据提供的全限定类名生成实例
             val reporter = CoreUtils.createObject[KafkaMetricsReporter](reporterType)
+            // mark 初始化报告器 MetricsReporter.init()方法
             reporter.init(verifiableProps)
+            // mark 将报告器添加到列表中
             reporters += reporter
+            // mark 如果报告器实现了KafkaMetricsReporterMBean接口，则注册JMX MBean
             reporter match {
               case bean: KafkaMetricsReporterMBean => CoreUtils.registerMBean(reporter, bean.getMBeanName)
               case _ =>
             }
           })
+          // mark 标记报告器启动完成
           ReporterStarted.set(true)
         }
       }
     }
+    // 返回报告器列表
     reporters
   }
 }

@@ -33,28 +33,41 @@ object EndPoint {
     SecurityProtocol.values.map(sp => ListenerName.forSecurityProtocol(sp) -> sp).toMap
 
   /**
-   * Create EndPoint object from `connectionString` and optional `securityProtocolMap`. If the latter is not provided,
-   * we fallback to the default behaviour where listener names are the same as security protocols.
+   * 根据连接字符串和安全协议映射创建EndPoint对象。
    *
-   * @param connectionString the format is listener_name://host:port or listener_name://[ipv6 host]:port
-   *                         for example: PLAINTEXT://myhost:9092, CLIENT://myhost:9092 or REPLICATION://[::1]:9092
-   *                         Host can be empty (PLAINTEXT://:9092) in which case we'll bind to default interface
-   *                         Negative ports are also accepted, since they are used in some unit tests
+   * 连接字符串的格式为listener_name://host:port，其中listener_name是监听器名称，host是主机地址，port是端口号。
+   * 如果未提供安全协议映射，则使用默认的安全协议映射。
+   *
+   * @param connectionString    连接字符串，描述了监听器名称、主机地址和端口号。
+   * @param securityProtocolMap 安全协议映射，可选，映射监听器名称到安全协议。
+   * @return 返回一个EndPoint对象，表示连接的端点。
+   * @throws IllegalArgumentException 如果未为指定的监听器定义安全协议，则抛出此异常。
+   * @throws KafkaException           如果无法解析连接字符串为有效的Broker端点，则抛出此异常。
    */
   def createEndPoint(connectionString: String, securityProtocolMap: Option[Map[ListenerName, SecurityProtocol]]): EndPoint = {
+    // mark 使用提供的安全协议映射，或默认映射。
     val protocolMap = securityProtocolMap.getOrElse(DefaultSecurityProtocolMap)
 
+    // mark 根据监听器名称获取安全协议，如果未定义则抛出异常。
     def securityProtocol(listenerName: ListenerName): SecurityProtocol =
       protocolMap.getOrElse(listenerName,
         throw new IllegalArgumentException(s"No security protocol defined for listener ${listenerName.value}"))
 
+    // 解析连接字符串并创建EndPoint对象。
     connectionString match {
+      // mark 解析不包含主机地址的连接字符串（只有监听器名称和端口）。
+      // mark scala的正则匹配非常简单 定义正则表达式 pattern = ^(.*)://\[?([0-9a-zA-Z\-%._:]*)\]?:(-?[0-9]+)
+      // mark str match {case pattern(a, b, c)} 采用这种模式 scala会自动帮你解析出匹配的组并且绑定到a,b,c中
       case uriParseExp(listenerNameString, "", port) =>
         val listenerName = ListenerName.normalised(listenerNameString)
         new EndPoint(null, port.toInt, listenerName, securityProtocol(listenerName))
+      // mark 解析包含主机地址的连接字符串。
       case uriParseExp(listenerNameString, host, port) =>
+        // mark 根据监听器名称创建 ListenerName 对象
         val listenerName = ListenerName.normalised(listenerNameString)
+        // mark 根据 host port 监听器名称 协议名称创建EndPoint对象
         new EndPoint(host, port.toInt, listenerName, securityProtocol(listenerName))
+      // mark 如果连接字符串格式无效，则抛出异常。
       case _ => throw new KafkaException(s"Unable to parse $connectionString to a broker endpoint")
     }
   }
@@ -77,12 +90,24 @@ object EndPoint {
  * Part of the broker definition - matching host/port pair to a protocol
  */
 case class EndPoint(host: String, port: Int, listenerName: ListenerName, securityProtocol: SecurityProtocol) {
+
+  /**
+   * 构建连接字符串。
+   *
+   * 此方法用于根据将EndPoint转化为字符串
+   * 连接字符串的格式为“listenerName://host:port”，其中listenerName是监听器的名称，
+   * host是主机地址，port是端口号。如果host为null，则只显示端口号。
+   *
+   * @return 返回构建好的连接字符串。
+   */
   def connectionString: String = {
+    // 根据host是否为null，决定如何构造hostport部分
     val hostport =
       if (host == null)
-        ":"+port
+        ":" + port
       else
         Utils.formatAddress(host, port)
+    // 组合监听器名称和hostport，形成最终的连接字符串
     listenerName.value + "://" + hostport
   }
 
