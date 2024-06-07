@@ -218,12 +218,21 @@ class DynamicBrokerConfig(private val kafkaConfig: KafkaConfig) extends Logging 
     Some(PasswordEncoder.noop())
   }
 
+  /**
+   * 初始化方法。
+   *
+   * @param zkClientOpt 可选的 KafkaZkClient 实例，用于与 ZooKeeper 进行交互。
+   */
   private[server] def initialize(zkClientOpt: Option[KafkaZkClient]): Unit = {
+    // 初始化当前配置
     currentConfig = new KafkaConfig(kafkaConfig.props, false, None)
 
     zkClientOpt.foreach { zkClient =>
+      // 创建 AdminZkClient 实例
       val adminZkClient = new AdminZkClient(zkClient)
+      // 更新默认配置
       updateDefaultConfig(adminZkClient.fetchEntityConfig(ConfigType.Broker, ConfigEntityName.Default), false)
+      // 获取并更新 Broker 配置
       val props = adminZkClient.fetchEntityConfig(ConfigType.Broker, kafkaConfig.brokerId.toString)
       val brokerConfig = maybeReEncodePasswords(props, adminZkClient)
       updateBrokerConfig(kafkaConfig.brokerId, brokerConfig)
