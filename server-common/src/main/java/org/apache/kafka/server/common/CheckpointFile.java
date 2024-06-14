@@ -37,13 +37,13 @@ import java.util.Optional;
 
 /**
  * This class represents a utility to capture a checkpoint in a file. It writes down to the file in the below format.
- *
+ * 该类表示用于在文件中捕获检查点的工具。它以下列格式写入文件。
  * ========= File beginning =========
  * version: int
  * entries-count: int
- * entry-as-string-on-each-line
+ * topic partition int
  * ========= File end ===============
- *
+ * 在检查点文件中，每个条目都表示为一行字符串。{@link EntryFormatter} 用于将条目转换为字符串及其逆转换。
  * Each entry is represented as a string on each line in the checkpoint file. {@link EntryFormatter} is used
  * to convert the entry into a string and vice versa.
  *
@@ -125,53 +125,90 @@ public class CheckpointFile<T> {
             this.formatter = formatter;
         }
 
+        /**
+         * 从检查点文件中读取条目列表。
+         *
+         * @return 条目的列表，如果文件为空或无法识别版本，则返回空列表。
+         * @throws IOException 如果文件读取失败，版本不匹配，或文件格式不正确。
+         */
         List<T> read() throws IOException {
+            // mark 读取文件的第一行，作为版本号
             String line = reader.readLine();
+            // mark 如果文件已经结束，返回空列表
             if (line == null)
                 return Collections.emptyList();
 
+            // mark 将读取的字符串转换为整数类型的版本号
             int readVersion = toInt(line);
+            // mark 检查读取的版本号是否与期望的版本号匹配
             if (readVersion != version) {
+                // 版本不匹配时，抛出IOException
                 throw new IOException("Unrecognised version:" + readVersion + ", expected version: " + version
                                               + " in checkpoint file at: " + location);
             }
 
+            // mark 读取文件的第二行，作为条目的预期数量
             line = reader.readLine();
+            // mark 如果文件在此时已经结束，返回空列表
             if (line == null) {
                 return Collections.emptyList();
             }
+
+            // mark 将读取的字符串转换为整数类型的预期条目数量
             int expectedSize = toInt(line);
+            // mark 初始化一个列表，用于存储读取的条目
             List<T> entries = new ArrayList<>(expectedSize);
+            // 从文件中继续读取行，直到文件结束
             line = reader.readLine();
             while (line != null) {
+                // mark 将检查点中的 topic partition offset 转换成元祖 Option((TopicPartition(topic, partition), offset))
                 Optional<T> maybeEntry = formatter.fromString(line);
+                // mark 如果不存在则抛出格式错误
                 if (!maybeEntry.isPresent()) {
                     throw buildMalformedLineException(line);
                 }
+                // mark 保存 TopicPartition(topic, partition), offset)
                 entries.add(maybeEntry.get());
+                // mark 继续读取文件的下一行
                 line = reader.readLine();
             }
 
+            // mark 检查实际读取的条目数量是否与预期数量相符 不相符时，抛出IOException
             if (entries.size() != expectedSize) {
                 throw new IOException("Expected [" + expectedSize + "] entries in checkpoint file ["
                                               + location + "], but found only [" + entries.size() + "]");
             }
-
+            // mark TopicPartition(topic, partition), offset) 集合
             return entries;
         }
 
+        /**
+         * 将字符串转换为整数。如果转换失败，抛出IOException。
+         *
+         * @param line 要转换的字符串。
+         * @return 转换后的整数值。
+         * @throws IOException 如果字符串不能转换为整数。
+         */
         private int toInt(String line) throws IOException {
             try {
                 return Integer.parseInt(line);
             } catch (NumberFormatException e) {
+                // 转换失败时，抛出IOException
                 throw buildMalformedLineException(line);
             }
         }
 
+        /**
+         * 构建一个表示文件格式错误的IOException。
+         *
+         * @param line 造成错误的文件行。
+         * @return 一个IOException实例，描述了文件格式错误。
+         */
         private IOException buildMalformedLineException(String line) {
             return new IOException(String.format("Malformed line in checkpoint file [%s]: %s", location, line));
         }
     }
+
 
     /**
      * This is used to convert the given entry of type {@code T} into a string and vice versa.

@@ -500,6 +500,11 @@ object KafkaConfig {
   val MessageMaxBytesProp = "message.max.bytes"
   val NumNetworkThreadsProp = "num.network.threads"
   val NumIoThreadsProp = "num.io.threads"
+  /**
+   * <p>background.threads</p>
+   * <p>配置项用于设置 Kafka 代理中用于执行后台任务的线程数量。这些后台任务包括日志清理、文件关闭以及其他维护工作。</p>
+   * <p>默认值 10</p>
+   */
   val BackgroundThreadsProp = "background.threads"
   val NumReplicaAlterLogDirsThreadsProp = "num.replica.alter.log.dirs.threads"
   /**
@@ -652,6 +657,11 @@ object KafkaConfig {
   val LogMessageTimestampTypeProp = LogConfigPrefix + "message.timestamp.type"
   val LogMessageTimestampDifferenceMaxMsProp = LogConfigPrefix + "message.timestamp.difference.max.ms"
   val LogMaxIdMapSnapshotsProp = LogConfigPrefix + "max.id.map.snapshots"
+  /**
+   * <h1>num.recovery.threads.per.data.dir</h1>
+   * <p>用于控制每个数据目录日志恢复线程数量</p>
+   * <p>默认值是 10</p>
+   */
   val NumRecoveryThreadsPerDataDirProp = "num.recovery.threads.per.data.dir"
   val AutoCreateTopicsEnableProp = "auto.create.topics.enable"
   val MinInSyncReplicasProp = "min.insync.replicas"
@@ -1946,6 +1956,8 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
   def metadataRetentionMillis = getLong(KafkaConfig.MetadataMaxRetentionMillisProp)
 
   def numNetworkThreads = getInt(KafkaConfig.NumNetworkThreadsProp)
+
+  // mark 获取后台线程的数量
   def backgroundThreads = getInt(KafkaConfig.BackgroundThreadsProp)
 
   // mark queued.max.requests限制 Kafka Broker 在处理客户端请求时，可以在队列中积压的最大请求数。

@@ -426,11 +426,18 @@ object LogConfig {
 
   private[kafka] def configKeys: Map[String, ConfigKey] = configDef.configKeys.asScala
 
+  /**
+   * mark 验证配置属性的值
+   * 该方法验证配置属性中最小压缩延迟和最大压缩延迟的值，确保最小压缩延迟不大于最大压缩延迟。
+   *
+   * @param props 包含配置属性的映射
+   * @throws InvalidConfigurationException 如果最小压缩延迟大于最大压缩延迟，则抛出异常
+   */
   def validateValues(props: java.util.Map[_, _]): Unit = {
-    val minCompactionLag =  props.get(MinCompactionLagMsProp).asInstanceOf[Long]
-    val maxCompactionLag =  props.get(MaxCompactionLagMsProp).asInstanceOf[Long]
+    val minCompactionLag = props.get(MinCompactionLagMsProp).asInstanceOf[Long]
+    val maxCompactionLag = props.get(MaxCompactionLagMsProp).asInstanceOf[Long]
     if (minCompactionLag > maxCompactionLag) {
-      throw new InvalidConfigurationException(s"conflict topic config setting $MinCompactionLagMsProp " +
+      throw new InvalidConfigurationException(s"冲突的主题配置: $MinCompactionLagMsProp " +
         s"($minCompactionLag) > $MaxCompactionLagMsProp ($maxCompactionLag)")
     }
   }
@@ -527,13 +534,15 @@ object LogConfig {
   }
 
   /**
-   * Copy the subset of properties that are relevant to Logs. The individual properties
-   * are listed here since the names are slightly different in each Config class...
+   * mark 提取与日志相关的配置子集
+   * 该方法从 KafkaConfig 对象中提取与日志配置相关的属性，并返回一个包含这些属性的映射。
+   * 由于每个 Config 类中的属性名称略有不同，因此需要单独列出每个属性。
+   *
+   * @param kafkaConfig Kafka 配置对象
+   * @return 包含与日志相关的配置属性的映射
    */
   @nowarn("cat=deprecation")
-  def extractLogConfigMap(
-    kafkaConfig: KafkaConfig
-  ): java.util.Map[String, Object] = {
+  def extractLogConfigMap(kafkaConfig: KafkaConfig): java.util.Map[String, Object] = {
     val logProps = new java.util.HashMap[String, Object]()
     logProps.put(SegmentBytesProp, kafkaConfig.logSegmentBytes)
     logProps.put(SegmentMsProp, kafkaConfig.logRollTimeMillis)

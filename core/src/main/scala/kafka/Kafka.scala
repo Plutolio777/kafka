@@ -117,6 +117,7 @@ object Kafka extends Logging {
           warn("Failed to register optional signal handler that logs a message when the process is terminated " +
             s"by a signal. Reason for registration failure is: $e", e)
       }
+
       // mark 添加java进程退出的hook，这里检测到服务退出的时候会调用 server.shutdown()
       // attach shutdown handler to catch terminating signals as well as normal termination
       Exit.addShutdownHook("kafka-shutdown-hook", {

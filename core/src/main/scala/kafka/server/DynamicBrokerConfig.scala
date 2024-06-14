@@ -88,8 +88,10 @@ object DynamicBrokerConfig {
     ProducerStateManagerConfig.ReconfigurableConfigs
 
   private val ClusterLevelListenerConfigs = Set(KafkaConfig.MaxConnectionsProp, KafkaConfig.MaxConnectionCreationRateProp, KafkaConfig.NumNetworkThreadsProp)
+
   private val PerBrokerConfigs = (DynamicSecurityConfigs ++ DynamicListenerConfig.ReconfigurableConfigs).diff(
     ClusterLevelListenerConfigs)
+
   private val ListenerMechanismConfigs = Set(KafkaConfig.SaslJaasConfigProp,
     KafkaConfig.SaslLoginCallbackHandlerClassProp,
     KafkaConfig.SaslLoginClassProp,
@@ -154,6 +156,7 @@ object DynamicBrokerConfig {
   }
 
   private def nonDynamicConfigs(props: Properties): Set[String] = {
+    // mark 返回props和 DynamicConfig.Broker.nonDynamicProps的交集
     props.asScala.keySet.intersect(DynamicConfig.Broker.nonDynamicProps)
   }
 
@@ -224,17 +227,18 @@ class DynamicBrokerConfig(private val kafkaConfig: KafkaConfig) extends Logging 
    * @param zkClientOpt 可选的 KafkaZkClient 实例，用于与 ZooKeeper 进行交互。
    */
   private[server] def initialize(zkClientOpt: Option[KafkaZkClient]): Unit = {
-    // 初始化当前配置
+    // mark kafkaConfig.props为配置文件中的初始配置 这里用重新生成KafkaConfig?
     currentConfig = new KafkaConfig(kafkaConfig.props, false, None)
 
     zkClientOpt.foreach { zkClient =>
       // 创建 AdminZkClient 实例
       val adminZkClient = new AdminZkClient(zkClient)
-      // 更新默认配置
+      // mark 从kafka拉取配置并更新 路径为 /config/brokers/<default> 拉取配置（如果不存在节点则返回空Properties）
       updateDefaultConfig(adminZkClient.fetchEntityConfig(ConfigType.Broker, ConfigEntityName.Default), false)
-      // 获取并更新 Broker 配置
+      // mark 从kafka拉取配置并更新 路径为 /config/brokers/<brokerid> 拉取配置（如果不存在节点则返回空Properties）
       val props = adminZkClient.fetchEntityConfig(ConfigType.Broker, kafkaConfig.brokerId.toString)
       val brokerConfig = maybeReEncodePasswords(props, adminZkClient)
+      // mark 更新broker配置
       updateBrokerConfig(kafkaConfig.brokerId, brokerConfig)
     }
   }
@@ -321,9 +325,21 @@ class DynamicBrokerConfig(private val kafkaConfig: KafkaConfig) extends Logging 
     }
   }
 
+  /**
+   * 更新默认配置
+   * 该方法使用写锁来确保对默认配置的安全更新。
+   * 它尝试将持久化属性转换为普通属性，并更新动态默认配置。
+   * 如果启用了日志记录，则会记录配置更新的操作。
+   * 如果更新过程中发生异常，则记录错误信息。
+   *
+   * @param persistentProps 需要更新的配置Properties
+   * @param doLog           是否记录日志，默认值为 true
+   */
   private[server] def updateDefaultConfig(persistentProps: Properties, doLog: Boolean = true): Unit = CoreUtils.inWriteLock(lock) {
     try {
+      // mark 对配置进行修正 比如有些不能够自动配置的需要移除
       val props = fromPersistentProps(persistentProps, perBrokerConfig = false)
+      // mark 覆盖配置
       dynamicDefaultConfigs.clear()
       dynamicDefaultConfigs ++= props.asScala
       updateCurrentConfig(doLog)
@@ -384,21 +400,47 @@ class DynamicBrokerConfig(private val kafkaConfig: KafkaConfig) extends Logging 
     props
   }
 
-  private[server] def fromPersistentProps(persistentProps: Properties,
-                                          perBrokerConfig: Boolean): Properties = {
+  /**
+   * 从持久化属性生成配置
+   * 该方法从持久化属性中生成配置，并移除无效的配置项。
+   * 它处理动态和安全配置，并对密码进行解码。
+   *
+   * @param persistentProps 持久化属性
+   * @param perBrokerConfig 是否为每个代理配置
+   * @return 处理后的配置属性
+   */
+  private[server] def fromPersistentProps(persistentProps: Properties, perBrokerConfig: Boolean): Properties = {
     val props = persistentProps.clone().asInstanceOf[Properties]
 
-    // Remove all invalid configs from `props`
+    // 移除 `props` 中所有无效的配置项
     removeInvalidConfigs(props, perBrokerConfig)
+
+    /**
+     * 移除无效的属性。
+     *
+     * 本函数用于从一个集合中移除指定的无效属性名，并记录一个错误信息。如果传入的无效属性名集合不为空，
+     * 则遍历该集合，从一个名为`props`的存储结构中移除这些属性。同时，使用传入的错误信息和移除的属性名
+     * 组合成一条具体的错误信息，并记录下来。
+     *
+     * @param invalidPropNames 一个包含无效属性名的集合。
+     * @param errorMessage     错误信息的模板，用于在移除无效属性时记录错误。
+     */
     def removeInvalidProps(invalidPropNames: Set[String], errorMessage: String): Unit = {
+      // 当无效属性名集合不为空时，执行属性移除和错误记录操作
       if (invalidPropNames.nonEmpty) {
+        // 遍历无效属性名集合，从`props`中移除这些属性
         invalidPropNames.foreach(props.remove)
+        // 使用错误信息模板和实际的无效属性名生成并记录错误信息
         error(s"$errorMessage: $invalidPropNames")
       }
     }
+
+    // mark ZooKeeper 中配置的非动态配置项将被忽略
     removeInvalidProps(nonDynamicConfigs(props), "Non-dynamic configs configured in ZooKeeper will be ignored")
+    // mark 安全配置仅能通过监听器前缀动态更新，基础配置将被忽略(可以更新监听器名称 但是相关的安全配置都固定)
     removeInvalidProps(securityConfigsWithoutListenerPrefix(props),
       "Security configs can be dynamically updated only using listener prefix, base configs will be ignored")
+    // mark 默认集群级别定义的每代理（per-broker）配置将被忽略
     if (!perBrokerConfig)
       removeInvalidProps(perBrokerConfigs(props), "Per-broker configs defined at default cluster level will be ignored")
 
@@ -418,6 +460,7 @@ class DynamicBrokerConfig(private val kafkaConfig: KafkaConfig) extends Logging 
       if (isPasswordConfig(name))
         decodePassword(name, value)
     }
+
     props
   }
 
@@ -501,63 +544,97 @@ class DynamicBrokerConfig(private val kafkaConfig: KafkaConfig) extends Logging 
   }
 
   /**
-   * Returns the change in configurations between the new props and current props by returning a
-   * map of the changed configs, as well as the set of deleted keys
+   * mark 返回新旧配置中更新的配置 已经被删除的配置
+   *
+   * @param newProps     新配置属性的映射
+   * @param currentProps 当前配置属性的映射
+   * @return 包含更改配置的映射和删除键的集合
    */
-  private def updatedConfigs(newProps: java.util.Map[String, _],
-                             currentProps: java.util.Map[String, _]): (mutable.Map[String, _], Set[String]) = {
+  private def updatedConfigs(newProps: java.util.Map[String, _], currentProps: java.util.Map[String, _]): (mutable.Map[String, _], Set[String]) = {
+    // mark 过滤出更新的配置
     val changeMap = newProps.asScala.filter {
       case (k, v) => v != currentProps.get(k)
     }
+    // mark 过滤出已经删除的配置
     val deletedKeySet = currentProps.asScala.filter {
       case (k, _) => !newProps.containsKey(k)
     }.keySet
     (changeMap, deletedKeySet)
   }
-
   /**
-    * Updates values in `props` with the new values from `propsOverride`. Synonyms of updated configs
-    * are removed from `props` to ensure that the config with the higher precedence is applied. For example,
-    * if `log.roll.ms` was defined in server.properties and `log.roll.hours` is configured dynamically,
-    * `log.roll.hours` from the dynamic configuration will be used and `log.roll.ms` will be removed from
-    * `props` (even though `log.roll.hours` is secondary to `log.roll.ms`).
-    */
+   * 使用 `propsOverride` 中的新值更新 `props` 中的值。
+   * 已更新配置的同义词将从 `props` 中移除，以确保应用具有更高优先级的配置。
+   * 例如，如果 `log.roll.ms` 在 server.properties 中定义，且 `log.roll.hours` 被动态配置，
+   * 则将使用动态配置中的 `log.roll.hours`，并且 `log.roll.ms` 将从 `props` 中移除（即使 `log.roll.hours` 的优先级低于 `log.roll.ms`）。
+   *
+   * @param props         需要被覆盖更新的配置映射
+   * @param propsOverride 提供新值的配置映射
+   */
   private def overrideProps(props: mutable.Map[String, String], propsOverride: mutable.Map[String, String]): Unit = {
     propsOverride.forKeyValue { (k, v) =>
-      // Remove synonyms of `k` to ensure the right precedence is applied. But disable `matchListenerOverride`
-      // so that base configs corresponding to listener configs are not removed. Base configs should not be removed
-      // since they may be used by other listeners. It is ok to retain them in `props` since base configs cannot be
-      // dynamically updated and listener-specific configs have the higher precedence.
+      // 移除 `k` 的同义词，以确保应用正确的优先级。但禁用 `matchListenerOverride`
+      // 以避免移除与监听器配置对应的基础配置。基础配置不应被移除，因为其他监听器可能会使用它们。
+      // 保留基础配置是可以的，因为基础配置不能被动态更新，且监听器特定的配置具有更高优先级。
       brokerConfigSynonyms(k, matchListenerOverride = false).foreach(props.remove)
       props.put(k, v)
     }
   }
 
+  /**
+   * mark 动态配置覆盖静态配置
+   * 更新当前配置
+   * 该方法更新当前的代理配置，并应用动态配置覆盖静态配置。
+   * 它处理配置重新加载，并在必要时更新相关组件。
+   *
+   * @param doLog 是否记录日志
+   */
   private def updateCurrentConfig(doLog: Boolean): Unit = {
     val newProps = mutable.Map[String, String]()
+
+    // mark 将 staticBrokerConfigs (服务启动配置文件中的配置) 标记为新配置
     newProps ++= staticBrokerConfigs
+    // mark 用 dynamicDefaultConfigs 覆盖 newProps 中的相应配置
     overrideProps(newProps, dynamicDefaultConfigs)
+    // 用 dynamicBrokerConfigs 覆盖 newProps 中的相应配置
     overrideProps(newProps, dynamicBrokerConfigs)
 
     val oldConfig = currentConfig
     val (newConfig, brokerReconfigurablesToUpdate) = processReconfiguration(newProps, validateOnly = false, doLog)
+
+    // mark  scala中ne表示 not equal
     if (newConfig ne currentConfig) {
       currentConfig = newConfig
+      // mark 更新currentConfig
       kafkaConfig.updateCurrentConfig(newConfig)
 
-      // Process BrokerReconfigurable updates after current config is updated
+      // 在当前配置更新后处理 BrokerReconfigurable 更新
       brokerReconfigurablesToUpdate.foreach(_.reconfigure(oldConfig, newConfig))
     }
   }
 
+  /**
+   * 处理重新配置
+   * 该方法根据新配置属性生成新的 KafkaConfig 对象，并处理与配置变化相关的组件重新配置。
+   * 它还验证并更新需要重新配置的代理配置项。
+   *
+   * @param newProps     新的配置属性映射
+   * @param validateOnly 是否仅进行验证而不实际更新
+   * @param doLog        是否记录日志，默认值为 false
+   * @return 新的 KafkaConfig 对象和需要更新的 BrokerReconfigurable 列表
+   */
   private def processReconfiguration(newProps: Map[String, String], validateOnly: Boolean, doLog: Boolean = false): (KafkaConfig, List[BrokerReconfigurable]) = {
+    // mark 生成新的KafkaConfig
     val newConfig = new KafkaConfig(newProps.asJava, doLog, None)
+
     val (changeMap, deletedKeySet) = updatedConfigs(newConfig.originalsFromThisConfig, currentConfig.originals)
+
     if (changeMap.nonEmpty || deletedKeySet.nonEmpty) {
       try {
-        val customConfigs = new util.HashMap[String, Object](newConfig.originalsFromThisConfig) // non-Kafka configs
+        val customConfigs = new util.HashMap[String, Object](newConfig.originalsFromThisConfig) // 非 Kafka 配置
         newConfig.valuesFromThisConfig.keySet.forEach(k => customConfigs.remove(k))
+
         reconfigurables.forEach {
+          // mark 处理监听器相关配置
           case listenerReconfigurable: ListenerReconfigurable =>
             processListenerReconfigurable(listenerReconfigurable, newConfig, customConfigs, validateOnly, reloadOnly = false)
           case reconfigurable =>
@@ -565,7 +642,7 @@ class DynamicBrokerConfig(private val kafkaConfig: KafkaConfig) extends Logging 
               processReconfigurable(reconfigurable, changeMap.keySet, newConfig.valuesFromThisConfig, customConfigs, validateOnly)
         }
 
-        // BrokerReconfigurable updates are processed after config is updated. Only do the validation here.
+        // 在配置更新后处理 BrokerReconfigurable 更新。这里只进行验证。
         val brokerReconfigurablesToUpdate = mutable.Buffer[BrokerReconfigurable]()
         brokerReconfigurables.forEach { reconfigurable =>
           if (needsReconfiguration(reconfigurable.reconfigurableConfigs.asJava, changeMap.keySet, deletedKeySet)) {
@@ -578,13 +655,13 @@ class DynamicBrokerConfig(private val kafkaConfig: KafkaConfig) extends Logging 
       } catch {
         case e: Exception =>
           if (!validateOnly)
-            error(s"Failed to update broker configuration with configs : " +
-                  s"${ConfigUtils.configMapToRedactedString(newConfig.originalsFromThisConfig, KafkaConfig.configDef)}", e)
-          throw new ConfigException("Invalid dynamic configuration", e)
+            error(s"无法使用配置更新代理配置: " +
+              s"${ConfigUtils.configMapToRedactedString(newConfig.originalsFromThisConfig, KafkaConfig.configDef)}", e)
+          throw new ConfigException("无效的动态配置", e)
       }
-    }
-    else
+    } else {
       (currentConfig, List.empty)
+    }
   }
 
   private def needsReconfiguration(reconfigurableConfigs: util.Set[String], updatedKeys: Set[String], deletedKeys: Set[String]): Boolean = {
@@ -592,6 +669,16 @@ class DynamicBrokerConfig(private val kafkaConfig: KafkaConfig) extends Logging 
       reconfigurableConfigs.asScala.intersect(deletedKeys).nonEmpty
   }
 
+  /**
+   * 处理 ListenerReconfigurable 对象的重新配置
+   * 该方法根据新的 Kafka 配置和自定义配置，处理特定监听器的重新配置或验证。
+   *
+   * @param listenerReconfigurable 要重新配置的 ListenerReconfigurable 对象
+   * @param newConfig              新的 Kafka 配置
+   * @param customConfigs          自定义配置映射
+   * @param validateOnly           是否仅进行验证而不实际更新
+   * @param reloadOnly             是否仅在配置未改变时重新加载
+   */
   private def processListenerReconfigurable(listenerReconfigurable: ListenerReconfigurable,
                                             newConfig: KafkaConfig,
                                             customConfigs: util.Map[String, Object],
@@ -603,7 +690,8 @@ class DynamicBrokerConfig(private val kafkaConfig: KafkaConfig) extends Logging 
     val (changeMap, deletedKeys) = updatedConfigs(newValues, oldValues)
     val updatedKeys = changeMap.keySet
     val configsChanged = needsReconfiguration(listenerReconfigurable.reconfigurableConfigs, updatedKeys, deletedKeys)
-    // if `reloadOnly`, reconfigure if configs haven't changed. Otherwise reconfigure if configs have changed
+
+    // 如果 `reloadOnly` 为 true，在配置未改变时重新配置。否则，在配置改变时重新配置。
     if (reloadOnly != configsChanged)
       processReconfigurable(listenerReconfigurable, updatedKeys, newValues, customConfigs, validateOnly)
   }

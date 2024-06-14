@@ -265,15 +265,18 @@ class KafkaServer(
         logContext = new LogContext(s"[KafkaServer id=${config.brokerId}] ")
         this.logIdent = logContext.logPrefix
 
+        // mark kafka利用zookeeper实现运行过程中修改配置
         // initialize dynamic broker configs from ZooKeeper. Any updates made after this will be
         // applied after ZkConfigManager starts.
         config.dynamicConfig.initialize(Some(zkClient))
 
         /* start scheduler */
+        // mark 启动kafka后台任务调度线程池
         kafkaScheduler = new KafkaScheduler(config.backgroundThreads)
         kafkaScheduler.startup()
 
         /* create and configure metrics */
+        // mark 创建及配置监控，默认使用JMX及Yammer Metrics
         kafkaYammerMetrics = KafkaYammerMetrics.INSTANCE
         kafkaYammerMetrics.configure(config.originals)
         metrics = Server.initializeMetrics(config, time, clusterId)
@@ -297,6 +300,7 @@ class KafkaServer(
           logDirFailureChannel,
           config.usesTopicId)
         _brokerState = BrokerState.RECOVERY
+        // mark 启动管理器
         logManager.startup(zkClient.getAllTopicsInCluster())
 
         if (config.migrationEnabled) {

@@ -30,6 +30,8 @@ class CheckpointFileWithFailureHandler[T](val file: File,
                                           formatter: EntryFormatter[T],
                                           logDirFailureChannel: LogDirFailureChannel,
                                           logDir: String) {
+
+  // mark 检查点抽象，提供了对检查点文件的读写服务 真正的IO操作在这个里面
   private val checkpointFile = new CheckpointFile[T](file, version, formatter)
 
   def write(entries: Iterable[T]): Unit = {

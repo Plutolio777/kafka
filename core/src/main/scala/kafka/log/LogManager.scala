@@ -112,8 +112,11 @@ class LogManager(logDirs: Seq[File],
   }
 
   private val dirLocks = lockLogDirs(liveLogDirs)
+  // mark 用于加载日志文件夹中的 recovery-point-offset-checkpoint 文件
   @volatile private var recoveryPointCheckpoints = liveLogDirs.map(dir =>
+    // mark RecoveryPointCheckpointFile:recovery-point-offset-checkpoint
     (dir, new OffsetCheckpointFile(new File(dir, RecoveryPointCheckpointFile), logDirFailureChannel))).toMap
+  // mark 用于加载日志文件夹中的 log-start-offset-checkpoint 文件
   @volatile private var logStartOffsetCheckpoints = liveLogDirs.map(dir =>
     (dir, new OffsetCheckpointFile(new File(dir, LogStartOffsetCheckpointFile), logDirFailureChannel))).toMap
 
@@ -315,11 +318,26 @@ class LogManager(logDirs: Seq[File],
     log
   }
 
-  // factory class for naming the log recovery threads used in metrics
+  /**
+   * mark 日志恢复线程的工厂类。
+   * 此类用于生成具有特定命名规则和属性的线程，以支持在指标中进行日志恢复处理。
+   *
+   * @param dirPath 目录路径，用于生成唯一的线程名称，表示针对特定目录的日志恢复进程。
+   */
   class LogRecoveryThreadFactory(val dirPath: String) extends ThreadFactory {
+    /**
+     * 线程编号的原子整数，确保线程名称的唯一性。
+     */
     val threadNum = new AtomicInteger(0)
 
+    /**
+     * 创建一个新的线程。
+     *
+     * @param runnable 由该线程执行的任务。
+     * @return 返回一个配置了特定名称和非守护线程属性的线程。
+     */
     override def newThread(runnable: Runnable): Thread = {
+      // mark 使用KafkaThread静态类生成非守护线程
       KafkaThread.nonDaemon(logRecoveryThreadName(dirPath, threadNum.getAndIncrement()), runnable)
     }
   }
@@ -337,48 +355,65 @@ class LogManager(logDirs: Seq[File],
   }
 
   /**
-   * Recover and load all logs in the given data directories
+   * 恢复并加载给定数据目录中的所有日志
+   *
+   * @param defaultConfig        默认日志配置
+   * @param topicConfigOverrides 主题配置覆盖映射
    */
   private[log] def loadLogs(defaultConfig: LogConfig, topicConfigOverrides: Map[String, LogConfig]): Unit = {
     info(s"Loading logs from log dirs $liveLogDirs")
+    // mark 记录开始时间戳
     val startMs = time.hiResClockMs()
+    // mark 初始化线程池数组 每个数据文件夹都有一个线程池 保存在这个里面
     val threadPools = ArrayBuffer.empty[ExecutorService]
+    // mark 初始化离线目录集合
     val offlineDirs = mutable.Set.empty[(String, IOException)]
+    // mark 初始化恢复线程实例容器
     val jobs = ArrayBuffer.empty[Seq[Future[_]]]
     var numTotalLogs = 0
-    // log dir path -> number of Remaining logs map for remainingLogsToRecover metric
+    // mark 日志目录路径到剩余日志数量的映射，用于 remainingLogsToRecover 度量
     val numRemainingLogs: ConcurrentMap[String, Int] = new ConcurrentHashMap[String, Int]
-    // log recovery thread name -> number of remaining segments map for remainingSegmentsToRecover metric
+    // mark 日志恢复线程名称到剩余段数量的映射，用于 remainingSegmentsToRecover 度量
     val numRemainingSegments: ConcurrentMap[String, Int] = new ConcurrentHashMap[String, Int]
 
+    // mark 报告IO异常的方法
     def handleIOException(logDirAbsolutePath: String, e: IOException): Unit = {
       offlineDirs.add((logDirAbsolutePath, e))
       error(s"Error while loading log dir $logDirAbsolutePath", e)
     }
 
+    // mark 开始遍历日志文件夹
     for (dir <- liveLogDirs) {
+      // mark 获取日志文件夹绝对路径
       val logDirAbsolutePath = dir.getAbsolutePath
       var hadCleanShutdown: Boolean = false
       try {
+        // mark 根据配置 num.recovery.threads.per.data.dir 创建固定大小的线程池 现成工厂 LogRecoveryThreadFactory
         val pool = Executors.newFixedThreadPool(numRecoveryThreadsPerDataDir,
           new LogRecoveryThreadFactory(logDirAbsolutePath))
+        // mark 缓存生成的线程池
         threadPools.append(pool)
-
+        // mark 该文件是用来标志kafka是否为正常关闭
+        // mark Kafka 服务器在接收到关闭信号时，会执行一系列关闭操作，包括将所有未写入的数据刷到磁盘、关闭所有活动的文件句柄等。
+        //  完成这些操作后，会在每个日志目录中创建或更新 .kafka_cleanshutdown 文件。
         val cleanShutdownFile = new File(dir, LogLoader.CleanShutdownFile)
+        // mark 如果存在说明是正常关闭kafka
         if (cleanShutdownFile.exists) {
+          // mark 如果有该文件则跳过日志恢复的过程
           info(s"Skipping recovery for all logs in $logDirAbsolutePath since clean shutdown file was found")
-          // Cache the clean shutdown status and use that for rest of log loading workflow. Delete the CleanShutdownFile
-          // so that if broker crashes while loading the log, it is considered hard shutdown during the next boot up. KAFKA-10471
+          // 缓存清洁关闭状态，并将其用于剩余的日志加载工作流。删除 CleanShutdownFile，以便在代理加载日志时崩溃时，
+          // 在下次启动期间将其视为硬关闭。KAFKA-10471
           Files.deleteIfExists(cleanShutdownFile.toPath)
           hadCleanShutdown = true
         } else {
-          // log recovery itself is being performed by `Log` class during initialization
           info(s"Attempting recovery for all logs in $logDirAbsolutePath since no clean shutdown file was found")
         }
+        // mark 保存日志路径和是否正常关闭标志位
         hadCleanShutdownFlags.put(logDirAbsolutePath, hadCleanShutdown)
 
         var recoveryPoints = Map[TopicPartition, Long]()
         try {
+          // mark 读取恢复检查点(recovery-point-offset-checkpoint)文件生成 Map<Set(TopicPartition, Offset)> 对象
           recoveryPoints = this.recoveryPointCheckpoints(dir).read()
         } catch {
           case e: Exception =>
@@ -388,6 +423,7 @@ class LogManager(logDirs: Seq[File],
 
         var logStartOffsets = Map[TopicPartition, Long]()
         try {
+          // mark 读取恢复检查点(log-start-offset-checkpoint)文件生成 Map<Set(TopicPartition, Offset)> 对象
           logStartOffsets = this.logStartOffsetCheckpoints(dir).read()
         } catch {
           case e: Exception =>
@@ -413,8 +449,8 @@ class LogManager(logDirs: Seq[File],
               case e: IOException =>
                 handleIOException(logDirAbsolutePath, e)
               case e: KafkaStorageException if e.getCause.isInstanceOf[IOException] =>
-                // KafkaStorageException might be thrown, ex: during writing LeaderEpochFileCache
-                // And while converting IOException to KafkaStorageException, we've already handled the exception. So we can ignore it here.
+              // KafkaStorageException 可能会被抛出，例如在写入 LeaderEpochFileCache 时
+              // 并且在将 IOException 转换为 KafkaStorageException 时，我们已经处理了异常。因此，我们可以忽略它。
             } finally {
               val logLoadDurationMs = time.hiResClockMs() - logLoadStartMs
               val remainingLogs = decNumRemainingLogs(numRemainingLogs, logDirAbsolutePath)
@@ -426,7 +462,7 @@ class LogManager(logDirs: Seq[File],
               }
 
               if (remainingLogs == 0) {
-                // loadLog is completed for all logs under the logDdir, mark it.
+                // loadLog 在 logDir 下的所有日志完成后，标记它。
                 loadLogsCompletedFlags.put(logDirAbsolutePath, true)
               }
             }
@@ -495,14 +531,25 @@ class LogManager(logDirs: Seq[File],
     startupWithConfigOverrides(defaultConfig, fetchTopicConfigOverrides(defaultConfig, topicNames))
   }
 
-  // visible for testing
+  /**
+   * mark 获取每个主题相关的配置并覆盖默认配置
+   * 该方法用于获取特定主题的配置覆盖，并返回一个映射，其中键是主题名称，值是对应的日志配置。
+   * 该方法在测试中可见。
+   *
+   * @param defaultConfig 默认的日志配置
+   * @param topicNames    需要获取配置覆盖的主题名称集合
+   * @return 包含主题配置覆盖的映射，其中键是主题名称，值是日志配置
+   */
   @nowarn("cat=deprecation")
   private[log] def fetchTopicConfigOverrides(defaultConfig: LogConfig, topicNames: Set[String]): Map[String, LogConfig] = {
     val topicConfigOverrides = mutable.Map[String, LogConfig]()
+    // mark 获取默认配置
     val defaultProps = defaultConfig.originals()
+    // mark 遍历topic名称
     topicNames.foreach { topicName =>
+      // mark 从zookeeper中获取topic的动态配置
       var overrides = configRepository.topicConfig(topicName)
-      // save memory by only including configs for topics with overrides
+      // 仅为有覆盖的主题包括配置以节省内存
       if (!overrides.isEmpty) {
         Option(overrides.getProperty(LogConfig.MessageFormatVersionProp)).foreach { versionString =>
           val messageFormatVersion = new MessageFormatVersion(versionString, interBrokerProtocolVersion.version)
@@ -517,10 +564,13 @@ class LogManager(logDirs: Seq[File],
           }
         }
 
+        // mark 用overrides覆盖defaultProps中相同配置
         val logConfig = LogConfig.fromProps(defaultProps, overrides)
+
         topicConfigOverrides(topicName) = logConfig
       }
     }
+    // mark 返回topic名称与配置的映射Map
     topicConfigOverrides
   }
 
@@ -1368,6 +1418,20 @@ object LogManager {
   val RecoveryPointCheckpointFile = "recovery-point-offset-checkpoint"
   val LogStartOffsetCheckpointFile = "log-start-offset-checkpoint"
 
+  /**
+   * 创建并配置 LogManager 实例
+   * 该方法使用提供的配置和参数来创建一个新的 LogManager 实例，并进行必要的配置。
+   *
+   * @param config                    Kafka 配置对象
+   * @param initialOfflineDirs        初始离线目录列表
+   * @param configRepository          配置仓库
+   * @param kafkaScheduler            Kafka 调度器
+   * @param time                      时间对象
+   * @param brokerTopicStats          代理主题统计对象
+   * @param logDirFailureChannel      日志目录故障通道
+   * @param keepPartitionMetadataFile 是否保留分区元数据文件
+   * @return 配置好的 LogManager 实例
+   */
   def apply(config: KafkaConfig,
             initialOfflineDirs: Seq[String],
             configRepository: ConfigRepository,
@@ -1376,14 +1440,20 @@ object LogManager {
             brokerTopicStats: BrokerTopicStats,
             logDirFailureChannel: LogDirFailureChannel,
             keepPartitionMetadataFile: Boolean): LogManager = {
-    val defaultProps = LogConfig.extractLogConfigMap(config)
 
+    // mark 从配置中提取与日志相关的配置子集
+    val defaultProps = LogConfig.extractLogConfigMap(config)
+    // mark 对配置进行相关的验证
     LogConfig.validateValues(defaultProps)
+    // mark 生成LogConfig对象
     val defaultLogConfig = LogConfig(defaultProps)
 
+    // mark 获取日志清理器配置
     val cleanerConfig = LogCleaner.cleanerConfig(config)
 
-    new LogManager(logDirs = config.logDirs.map(new File(_).getAbsoluteFile),
+    // mark 创建并返回 LogManager 实例
+    new LogManager(
+      logDirs = config.logDirs.map(new File(_).getAbsoluteFile),
       initialOfflineDirs = initialOfflineDirs.map(new File(_).getAbsoluteFile),
       configRepository = configRepository,
       initialDefaultConfig = defaultLogConfig,
@@ -1401,7 +1471,8 @@ object LogManager {
       logDirFailureChannel = logDirFailureChannel,
       time = time,
       keepPartitionMetadataFile = keepPartitionMetadataFile,
-      interBrokerProtocolVersion = config.interBrokerProtocolVersion)
+      interBrokerProtocolVersion = config.interBrokerProtocolVersion
+    )
   }
 
 }

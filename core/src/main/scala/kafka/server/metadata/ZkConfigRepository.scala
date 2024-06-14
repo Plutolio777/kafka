@@ -31,19 +31,31 @@ object ZkConfigRepository {
 }
 
 class ZkConfigRepository(adminZkClient: AdminZkClient) extends ConfigRepository {
+
+  /**
+   * 获取配置资源的属性
+   * 该方法根据提供的配置资源类型（主题或代理）和名称从 ZooKeeper 中获取相应的配置属性。
+   *
+   * @param configResource 配置资源对象，包含资源类型和名称
+   * @return 包含配置属性的 Properties 对象
+   * @throws IllegalArgumentException 如果配置资源类型不支持，则抛出异常
+   */
   override def config(configResource: ConfigResource): Properties = {
+    // 根据配置资源类型获取 ZooKeeper 中的配置类型
     val configTypeForZk = configResource.`type` match {
       case Type.TOPIC => ConfigType.Topic
       case Type.BROKER => ConfigType.Broker
       case tpe => throw new IllegalArgumentException(s"Unsupported config type: $tpe")
     }
-    // ZK stores cluster configs under "<default>".
-    val effectiveName = if (configResource.`type`.equals(Type.BROKER) &&
-        configResource.name.isEmpty) {
+
+    // ZK 在 "<default>" 下存储集群配置
+    val effectiveName = if (configResource.`type`.equals(Type.BROKER) && configResource.name.isEmpty) {
       ConfigEntityName.Default
     } else {
       configResource.name
     }
+
+    // mark 从zookeeper中获取配置
     adminZkClient.fetchEntityConfig(configTypeForZk, effectiveName)
   }
 }

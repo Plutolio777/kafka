@@ -415,12 +415,19 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
   }
 
   /**
-   * Get entity configs for a given entity name
-   * @param rootEntityType entity type
-   * @param sanitizedEntityName entity name
-   * @return The successfully gathered log configs
+   * 获取给定实体名称的实体配置
+   * 该方法通过发起数据请求来检索指定实体的配置属性。
+   * 它使用重试逻辑确保即使存在连接问题也能完成请求。
+   * 如果找到实体，则返回其配置属性。
+   * 如果实体不存在，则返回一个空的 Properties 对象。
+   * 如果发生其他错误，则抛出相应的异常。
+   *
+   * @param rootEntityType      实体类型（broker,topic,client,user）
+   * @param sanitizedEntityName 实体名称
+   * @return 成功收集到的实体配置属性
    */
   def getEntityConfigs(rootEntityType: String, sanitizedEntityName: String): Properties = {
+    // mark 从zookeeper中获取数据 /config/brokers/<default>
     val getDataRequest = GetDataRequest(ConfigEntityZNode.path(rootEntityType, sanitizedEntityName))
     val getDataResponse = retryRequestUntilConnected(getDataRequest)
 
@@ -431,7 +438,6 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
       case _ => throw getDataResponse.resultException.get
     }
   }
-
   def getEntitiesConfigs(rootEntityType: String, sanitizedEntityNames: Set[String]): Map[String, Properties] = {
     val getDataRequests: Seq[GetDataRequest] = sanitizedEntityNames.map { entityName =>
       GetDataRequest(ConfigEntityZNode.path(rootEntityType, entityName), Some(entityName))
@@ -569,9 +575,12 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
   def getSortedBrokerList: Seq[Int] = getChildren(BrokerIdsZNode.path).map(_.toInt).sorted
 
   /**
-   * Gets all topics in the cluster.
-   * @param registerWatch indicates if a watch must be registered or not
-   * @return sequence of topics in the cluster.
+   * mark 获取集群中的所有主题
+   * 该方法返回集群中所有主题的集合。
+   *
+   * @param registerWatch 指示是否注册监视器，默认值为 false
+   * @return 集群中的主题集合
+   * @throws Exception 如果请求失败或出现其他错误，则抛出相应的异常
    */
   def getAllTopicsInCluster(registerWatch: Boolean = false): Set[String] = {
     val getChildrenResponse = retryRequestUntilConnected(
