@@ -66,23 +66,26 @@ public class FileRecords extends AbstractRecords implements Closeable {
         this.end = end;
         this.isSlice = isSlice;
         this.size = new AtomicInteger();
-
+        // mark 判断是否为视图切片
         if (isSlice) {
             // don't check the file size if this is just a slice view
+            // mark 不检查文件大小是否超过阈值 直接设置size
             size.set(end - start);
         } else {
+            // mark 检查文件大小是否超过阈值
             if (channel.size() > Integer.MAX_VALUE)
                 throw new KafkaException("The size of segment " + file + " (" + channel.size() +
                         ") is larger than the maximum allowed segment size of " + Integer.MAX_VALUE);
-
+            // mark 设置size
             int limit = Math.min((int) channel.size(), end);
             size.set(limit - start);
 
             // if this is not a slice, update the file pointer to the end of the file
             // set the file position to the last byte in the file
+            // mark 将文件指针设置到文件末尾
             channel.position(limit);
         }
-
+        // mark 用于生成处理日志段的迭代器
         batches = batchesFrom(start);
     }
 
@@ -446,14 +449,17 @@ public class FileRecords extends AbstractRecords implements Closeable {
     }
 
     /**
-     * Open a channel for the given file
-     * For windows NTFS and some old LINUX file system, set preallocate to true and initFileSize
-     * with one value (for example 512 * 1025 *1024 ) can improve the kafka produce performance.
-     * @param file File path
-     * @param mutable mutable
-     * @param fileAlreadyExists File already exists or not
-     * @param initFileSize The size used for pre allocate file, for example 512 * 1025 *1024
-     * @param preallocate Pre-allocate file or not, gotten from configuration.
+     * 打开给定文件的通道。
+     * 对于 Windows NTFS 和一些旧的 LINUX 文件系统，设置 preallocate 为 true 并将 initFileSize 设为一个值
+     * （例如 512 * 1025 * 1024）可以提高 Kafka 的生产性能。
+     *
+     * @param file 文件路径
+     * @param mutable 是否可变
+     * @param fileAlreadyExists 文件是否已经存在
+     * @param initFileSize 用于预分配文件的大小，例如 512 * 1025 * 1024
+     * @param preallocate 是否预分配文件，从配置中获取
+     * @return 打开的文件通道
+     * @throws IOException 如果发生 I/O 错误
      */
     private static FileChannel openChannel(File file,
                                            boolean mutable,
@@ -461,10 +467,12 @@ public class FileRecords extends AbstractRecords implements Closeable {
                                            int initFileSize,
                                            boolean preallocate) throws IOException {
         if (mutable) {
+            // mark 使用NIO的内存映射文件IO通道 性能最佳
             if (fileAlreadyExists || !preallocate) {
                 return FileChannel.open(file.toPath(), StandardOpenOption.CREATE, StandardOpenOption.READ,
                         StandardOpenOption.WRITE);
             } else {
+                // mark 传统随机读写IO通道
                 RandomAccessFile randomAccessFile = new RandomAccessFile(file, "rw");
                 randomAccessFile.setLength(initFileSize);
                 return randomAccessFile.getChannel();

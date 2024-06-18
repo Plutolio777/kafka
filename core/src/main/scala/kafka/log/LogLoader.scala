@@ -100,6 +100,7 @@ class LogLoader(
   def load(): LoadedLogOffsets = {
     // First pass: through the files in the log directory and remove any temporary files
     // and find any interrupted swap operations
+    // mark 清理临时日志段（这里需要注意由于存在swap文件，有的swap文件是需要进行恢复的这里判断哪些swap是有效的）
     val swapFiles = removeTempFilesAndCollectSwapFiles()
 
     // The remaining valid swap files must come from compaction or segment split operation. We can
@@ -109,6 +110,7 @@ class LogLoader(
     // We store segments that require renaming in this code block, and do the actual renaming later.
     var minSwapFileOffset = Long.MaxValue
     var maxSwapFileOffset = Long.MinValue
+    // mark 计算swap文件的最大最小偏移量
     swapFiles.filter(f => UnifiedLog.isLogFile(new File(CoreUtils.replaceSuffix(f.getPath, SwapFileSuffix, "")))).foreach { f =>
       val baseOffset = offsetFromFile(f)
       val segment = LogSegment.open(f.getParentFile,
@@ -124,6 +126,7 @@ class LogLoader(
     // Second pass: delete segments that are between minSwapFileOffset and maxSwapFileOffset. As
     // discussed above, these segments were compacted or split but haven't been renamed to .delete
     // before shutting down the broker.
+    // mark 将偏移量位于 [minSwapFileOffset, maxSwapFileOffset) 之间的日志段删除（标记为delete后缀文件）
     for (file <- dir.listFiles if file.isFile) {
       try {
         if (!file.getName.endsWith(SwapFileSuffix)) {
@@ -141,6 +144,7 @@ class LogLoader(
     }
 
     // Third pass: rename all swap files.
+    // mark 重命名所有swap文件将其转换为正常日志文件
     for (file <- dir.listFiles if file.isFile) {
       if (file.getName.endsWith(SwapFileSuffix)) {
         info(s"Recovering file ${file.getName} by renaming from ${UnifiedLog.SwapFileSuffix} files.")
@@ -151,6 +155,7 @@ class LogLoader(
     // Fourth pass: load all the log and index files.
     // We might encounter legacy log segments with offset overflow (KAFKA-6264). We need to split such segments. When
     // this happens, restart loading segment files from scratch.
+    // mark 加载日志段以及索引文件
     retryOnOffsetOverflow(() => {
       // In case we encounter a segment with offset overflow, the retry logic will split it after which we need to retry
       // loading of segments. In that case, we also need to close all segments that could have been left open in previous
@@ -212,72 +217,82 @@ class LogLoader(
   }
 
   /**
-   * Removes any temporary files found in log directory, and creates a list of all .swap files which could be swapped
-   * in place of existing segment(s). For log splitting, we know that any .swap file whose base offset is higher than
-   * the smallest offset .clean file could be part of an incomplete split operation. Such .swap files are also deleted
-   * by this method.
+   * 移除日志目录中的任何临时文件，并创建所有可以替换现有段的 .swap 文件列表。
+   * 对于日志拆分，我们知道任何基础偏移量高于最小偏移量 .clean 文件的 .swap 文件可能是未完成的拆分操作的一部分。
+   * 这种 .swap 文件也会被此方法删除。
    *
-   * @return Set of .swap files that are valid to be swapped in as segment files and index files
+   * @return 可以作为段文件和索引文件有效交换的 .swap 文件集
    */
   private def removeTempFilesAndCollectSwapFiles(): Set[File] = {
 
+    // 可变集合，用于存储 swap 和 cleaned 文件
     val swapFiles = mutable.Set[File]()
     val cleanedFiles = mutable.Set[File]()
+    // 变量，用于存储 cleaned 文件中的最小偏移量
     var minCleanedFileOffset = Long.MaxValue
 
+    // 遍历目录中的所有文件
     for (file <- dir.listFiles if file.isFile) {
+      // 如果文件不可读，抛出异常
       if (!file.canRead)
-        throw new IOException(s"Could not read file $file")
+        throw new IOException(s"无法读取文件 $file")
       val filename = file.getName
 
-      // Delete stray files marked for deletion, but skip KRaft snapshots.
-      // These are handled in the recovery logic in `KafkaMetadataLog`.
+      // 删除标记为删除的零散文件，但跳过 KRaft 快照。
+      // 这些文件在 `KafkaMetadataLog` 的恢复逻辑中处理。
+      // 如果是 delete 文件，则直接删除
       if (filename.endsWith(DeletedFileSuffix) && !filename.endsWith(Snapshots.DELETE_SUFFIX)) {
-        debug(s"Deleting stray temporary file ${file.getAbsolutePath}")
+        debug(s"删除零散的临时文件 ${file.getAbsolutePath}")
         Files.deleteIfExists(file.toPath)
+        // 如果是 cleaned 文件，保存已清理文件中最小的 offset
       } else if (filename.endsWith(CleanedFileSuffix)) {
         minCleanedFileOffset = Math.min(offsetFromFile(file), minCleanedFileOffset)
         cleanedFiles += file
+        // 如果是 swap 文件，则保存进行后续处理
       } else if (filename.endsWith(SwapFileSuffix)) {
         swapFiles += file
       }
     }
 
-    // KAFKA-6264: Delete all .swap files whose base offset is greater than the minimum .cleaned segment offset. Such .swap
-    // files could be part of an incomplete split operation that could not complete. See Log#splitOverflowedSegment
-    // for more details about the split operation.
+    // mark KAFKA-6264: 删除所有基础偏移量大于最小 .cleaned 段偏移量的 .swap 文件。
+    // 这些 .swap 文件可能是未完成的拆分操作的一部分。请参阅 Log#splitOverflowedSegment 了解拆分操作的更多详细信息。
+    // 以最小已清理文件偏移量为界，区分有效 swap 文件以及无效 swap 文件
     val (invalidSwapFiles, validSwapFiles) = swapFiles.partition(file => offsetFromFile(file) >= minCleanedFileOffset)
     invalidSwapFiles.foreach { file =>
-      debug(s"Deleting invalid swap file ${file.getAbsoluteFile} minCleanedFileOffset: $minCleanedFileOffset")
+      // 删除无效 swap 文件
+      debug(s"删除无效的 swap 文件 ${file.getAbsoluteFile} minCleanedFileOffset: $minCleanedFileOffset")
       Files.deleteIfExists(file.toPath)
     }
 
-    // Now that we have deleted all .swap files that constitute an incomplete split operation, let's delete all .clean files
+    // 既然已经删除了所有构成未完成拆分操作的 .swap 文件，现在删除所有 .clean 文件
     cleanedFiles.foreach { file =>
-      debug(s"Deleting stray .clean file ${file.getAbsolutePath}")
+      // 删除 cleaned 文件
+      debug(s"删除零散的 .clean 文件 ${file.getAbsolutePath}")
       Files.deleteIfExists(file.toPath)
     }
-
+    // 返回有效 swap 文件
     validSwapFiles
   }
 
   /**
-   * Retries the provided function only whenever an LogSegmentOffsetOverflowException is raised by
-   * it during execution. Before every retry, the overflowed segment is split into one or more segments
-   * such that there is no offset overflow in any of them.
+   * 当执行过程中抛出 LogSegmentOffsetOverflowException 时，重试提供的函数。
+   * 在每次重试之前，溢出的日志段将被拆分为一个或多个段，以确保其中没有偏移溢出。
    *
-   * @param fn The function to be executed
-   * @return The value returned by the function, if successful
-   * @throws Exception whenever the executed function throws any exception other than
-   *                   LogSegmentOffsetOverflowException, the same exception is raised to the caller
+   * @param fn 要执行的函数
+   * @return 如果成功，返回函数的返回值
+   * @throws Exception 如果执行的函数抛出 LogSegmentOffsetOverflowException 以外的任何异常，
+   *                   则向调用者抛出相同的异常
    */
   private def retryOnOffsetOverflow[T](fn: () => T): T = {
     while (true) {
       try {
+        // 尝试执行提供的函数
         return fn()
       } catch {
+        // 捕获 LogSegmentOffsetOverflowException 异常
         case e: LogSegmentOffsetOverflowException =>
           info(s"Caught segment overflow error: ${e.getMessage}. Split segment and retry.")
+          // 拆分溢出的日志段
           val result = UnifiedLog.splitOverflowedSegment(
             e.segment,
             segments,
@@ -287,37 +302,41 @@ class LogLoader(
             scheduler,
             logDirFailureChannel,
             logIdent)
+          // 异步删除生产者快照
           deleteProducerSnapshotsAsync(result.deletedSegments)
       }
     }
+    // 如果循环意外退出，抛出非法状态异常
     throw new IllegalStateException()
   }
 
   /**
-   * Loads segments from disk into the provided params.segments.
+   * 从磁盘加载日志段到提供的 `params.segments` 中。
    *
-   * This method does not need to convert IOException to KafkaStorageException because it is only called before all logs are loaded.
-   * It is possible that we encounter a segment with index offset overflow in which case the LogSegmentOffsetOverflowException
-   * will be thrown. Note that any segments that were opened before we encountered the exception will remain open and the
-   * caller is responsible for closing them appropriately, if needed.
+   * 由于此方法仅在所有日志加载之前调用，因此不需要将 IOException 转换为 KafkaStorageException。
+   * 可能会遇到具有索引偏移溢出的段，在这种情况下会抛出 LogSegmentOffsetOverflowException 异常。
+   * 请注意，在遇到异常之前打开的任何段将保持打开状态，调用者有责任在需要时适当地关闭它们。
    *
-   * @throws LogSegmentOffsetOverflowException if the log directory contains a segment with messages that overflow the index offset
+   * @throws LogSegmentOffsetOverflowException 如果日志目录包含消息偏移量溢出的段
    */
   private def loadSegmentFiles(): Unit = {
-    // load segments in ascending order because transactional data from one segment may depend on the
-    // segments that come before it
+    // mark 以升序加载日志段，因为一个段中的事务数据可能依赖于它之前的段
     for (file <- dir.listFiles.sortBy(_.getName) if file.isFile) {
+      // mark 索引文件处理
       if (isIndexFile(file)) {
-        // if it is an index file, make sure it has a corresponding .log file
+        // mark 根据索引的基础偏移量获取对应的log文件File对象
         val offset = offsetFromFile(file)
         val logFile = UnifiedLog.logFile(dir, offset)
+        // mark 如果没有对应的log文件中删除
         if (!logFile.exists) {
-          warn(s"Found an orphaned index file ${file.getAbsolutePath}, with no corresponding log file.")
+          warn(s"发现一个孤立的索引文件 ${file.getAbsolutePath}，没有对应的日志文件。")
           Files.deleteIfExists(file.toPath)
         }
+        // mark 日志段文件处理
       } else if (isLogFile(file)) {
-        // if it's a log file, load the corresponding log segment
+        // mark 获取基础偏移量
         val baseOffset = offsetFromFile(file)
+        // mark 时间索引文件是否存在
         val timeIndexFileNewlyCreated = !UnifiedLog.timeIndexFile(dir, baseOffset).exists()
         val segment = LogSegment.open(
           dir = dir,
@@ -330,13 +349,10 @@ class LogLoader(
         catch {
           case _: NoSuchFileException =>
             if (hadCleanShutdown || segment.baseOffset < recoveryPointCheckpoint)
-              error(s"Could not find offset index file corresponding to log file" +
-                s" ${segment.log.file.getAbsolutePath}, recovering segment and rebuilding index files...")
+              error(s"找不到对应于日志文件 ${segment.log.file.getAbsolutePath} 的偏移索引文件，恢复段并重建索引文件...")
             recoverSegment(segment)
           case e: CorruptIndexException =>
-            warn(s"Found a corrupted index file corresponding to log file" +
-              s" ${segment.log.file.getAbsolutePath} due to ${e.getMessage}}, recovering segment and" +
-              " rebuilding index files...")
+            warn(s"发现一个损坏的索引文件，对应于日志文件 ${segment.log.file.getAbsolutePath}，由于 ${e.getMessage}，恢复段并重建索引文件...")
             recoverSegment(segment)
         }
         segments.add(segment)

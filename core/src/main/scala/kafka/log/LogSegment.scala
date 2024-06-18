@@ -666,6 +666,19 @@ class LogSegment private[log] (val log: FileRecords,
 
 object LogSegment {
 
+  /**
+   * 打开一个日志段文件。
+   *
+   * @param dir               日志段所在的目录
+   * @param baseOffset        日志段的基础偏移量
+   * @param config            日志配置
+   * @param time              时间对象
+   * @param fileAlreadyExists 文件是否已经存在，默认为 false
+   * @param initFileSize      初始文件大小，默认为 0
+   * @param preallocate       是否预分配文件，默认为 false
+   * @param fileSuffix        文件后缀，默认为 ""
+   * @return 打开的日志段对象
+   */
   def open(dir: File, baseOffset: Long, config: LogConfig, time: Time, fileAlreadyExists: Boolean = false,
            initFileSize: Int = 0, preallocate: Boolean = false, fileSuffix: String = ""): LogSegment = {
     val maxIndexSize = config.maxIndexSize

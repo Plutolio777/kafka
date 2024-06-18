@@ -1810,6 +1810,26 @@ object UnifiedLog extends Logging {
 
   val UnknownOffset = LocalLog.UnknownOffset
 
+  /**
+   * 创建并加载一个新的 UnifiedLog 实例。
+   *
+   * @param dir                                 日志目录。
+   * @param config                              日志配置。
+   * @param logStartOffset                      日志起始偏移量。
+   * @param recoveryPoint                       恢复点偏移量。
+   * @param scheduler                           任务调度器。
+   * @param brokerTopicStats                    代理主题统计数据。
+   * @param time                                时间工具。
+   * @param maxTransactionTimeoutMs             最大事务超时时间（毫秒）。
+   * @param producerStateManagerConfig          生产者状态管理器配置。
+   * @param producerIdExpirationCheckIntervalMs 生产者ID过期检查间隔（毫秒）。
+   * @param logDirFailureChannel                日志目录故障通道。
+   * @param lastShutdownClean                   最后一次关闭是否干净。
+   * @param topicId                             主题ID。
+   * @param keepPartitionMetadataFile           是否保留分区元数据文件。
+   * @param numRemainingSegments                剩余日志段数量的并发映射。
+   * @return 创建的 UnifiedLog 实例。
+   */
   def apply(dir: File,
             config: LogConfig,
             logStartOffset: Long,
@@ -1825,18 +1845,29 @@ object UnifiedLog extends Logging {
             topicId: Option[Uuid],
             keepPartitionMetadataFile: Boolean,
             numRemainingSegments: ConcurrentMap[String, Int] = new ConcurrentHashMap[String, Int]): UnifiedLog = {
-    // create the log directory if it doesn't exist
+
+    // mark 如果日志目录不存在，则创建它
     Files.createDirectories(dir.toPath)
+
+    // mark 根据日志名称解析TopicPartition对象
     val topicPartition = UnifiedLog.parseTopicPartitionName(dir)
+
+    // mark 创建一个新的日志段实例 LogSegments提供了底层日志端的读写能力
     val segments = new LogSegments(topicPartition)
+
+    // 可能创建领导纪元缓存
     val leaderEpochCache = UnifiedLog.maybeCreateLeaderEpochCache(
       dir,
       topicPartition,
       logDirFailureChannel,
       config.recordVersion,
       s"[UnifiedLog partition=$topicPartition, dir=${dir.getParent}] ")
+
+    // mark 创建生产者状态管理器
     val producerStateManager = new ProducerStateManager(topicPartition, dir,
       maxTransactionTimeoutMs, producerStateManagerConfig, time)
+
+    // mark 加载日志并获取偏移量
     val offsets = new LogLoader(
       dir,
       topicPartition,
@@ -1852,8 +1883,12 @@ object UnifiedLog extends Logging {
       producerStateManager,
       numRemainingSegments
     ).load()
+
+    // 创建本地日志实例
     val localLog = new LocalLog(dir, config, segments, offsets.recoveryPoint,
       offsets.nextOffsetMetadata, scheduler, time, topicPartition, logDirFailureChannel)
+
+    // 返回一个新的 UnifiedLog 实例
     new UnifiedLog(offsets.logStartOffset,
       localLog,
       brokerTopicStats,
@@ -1931,16 +1966,15 @@ object UnifiedLog extends Logging {
   }
 
   /**
-   * If the recordVersion is >= RecordVersion.V2, then create and return a LeaderEpochFileCache.
-   * Otherwise, the message format is considered incompatible and the existing LeaderEpoch file
-   * is deleted.
+   * 如果 recordVersion >= RecordVersion.V2，则创建并返回一个 LeaderEpochFileCache。
+   * 否则，认为消息格式不兼容，删除现有的 LeaderEpoch 文件。
    *
-   * @param dir                  The directory in which the log will reside
-   * @param topicPartition       The topic partition
-   * @param logDirFailureChannel The LogDirFailureChannel to asynchronously handle log dir failure
-   * @param recordVersion The record version
-   * @param logPrefix The logging prefix
-   * @return The new LeaderEpochFileCache instance (if created), none otherwise
+   * @param dir                  日志所在的目录
+   * @param topicPartition       主题分区
+   * @param logDirFailureChannel 异步处理日志目录故障的 LogDirFailureChannel
+   * @param recordVersion        记录版本
+   * @param logPrefix            日志前缀
+   * @return 新创建的 LeaderEpochFileCache 实例（如果已创建），否则返回 None
    */
   def maybeCreateLeaderEpochCache(dir: File,
                                   topicPartition: TopicPartition,
@@ -1961,7 +1995,7 @@ object UnifiedLog extends Logging {
         None
 
       if (currentCache.exists(_.nonEmpty))
-        warn(s"${logPrefix}Deleting non-empty leader epoch cache due to incompatible message format $recordVersion")
+        warn(s"${logPrefix}由于不兼容的消息格式 $recordVersion，删除非空的领导纪元缓存")
 
       Files.deleteIfExists(leaderEpochFile.toPath)
       None

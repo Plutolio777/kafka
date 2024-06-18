@@ -266,6 +266,21 @@ class LogManager(logDirs: Seq[File],
   // Only for testing
   private[log] def hasLogsToBeDeleted: Boolean = !logsToBeDeleted.isEmpty
 
+  /*
+   * mark topic-partition日志加载。
+   *
+   * @param logDir 日志目录(topic-partition目录)。
+   * @param hadCleanShutdown 日志数据文件夹是否正常关闭。
+   * @param recoveryPoints 恢复点映射，其中包含每个主题分区的恢复点。
+   * @param logStartOffsets 日志起始偏移量映射，其中包含每个主题分区的起始偏移量。
+   * @param defaultConfig 默认日志配置。
+   * @param topicConfigOverrides 特定主题的配置覆盖映射。
+   * @param numRemainingSegments 剩余日志段数量映射。
+   *
+   * @return 加载的 UnifiedLog 实例。
+   *
+   * @throws IllegalStateException 如果发现重复的日志目录。
+   */
   private[log] def loadLog(logDir: File,
                            hadCleanShutdown: Boolean,
                            recoveryPoints: Map[TopicPartition, Long],
@@ -273,45 +288,60 @@ class LogManager(logDirs: Seq[File],
                            defaultConfig: LogConfig,
                            topicConfigOverrides: Map[String, LogConfig],
                            numRemainingSegments: ConcurrentMap[String, Int]): UnifiedLog = {
+
+    // mark 解析日志目录以获取主题分区(根据文件夹名称获得Topic-Partition对象)
     val topicPartition = UnifiedLog.parseTopicPartitionName(logDir)
+
+    // mark 获取主题配置，如果没有特定配置则使用默认配置(topicConfigOverrides 是设置在zookeeper里面的)
     val config = topicConfigOverrides.getOrElse(topicPartition.topic, defaultConfig)
+
+    // mark 获取恢复点和起始偏移量
     val logRecoveryPoint = recoveryPoints.getOrElse(topicPartition, 0L)
     val logStartOffset = logStartOffsets.getOrElse(topicPartition, 0L)
 
+    // 创建 UnifiedLog 实例
     val log = UnifiedLog(
-      dir = logDir,
-      config = config,
-      logStartOffset = logStartOffset,
-      recoveryPoint = logRecoveryPoint,
-      maxTransactionTimeoutMs = maxTransactionTimeoutMs,
-      producerStateManagerConfig = producerStateManagerConfig,
-      producerIdExpirationCheckIntervalMs = producerIdExpirationCheckIntervalMs,
-      scheduler = scheduler,
-      time = time,
-      brokerTopicStats = brokerTopicStats,
-      logDirFailureChannel = logDirFailureChannel,
-      lastShutdownClean = hadCleanShutdown,
-      topicId = None,
-      keepPartitionMetadataFile = keepPartitionMetadataFile,
-      numRemainingSegments = numRemainingSegments)
+      dir = logDir, // topic-partition日志目录
+      config = config, // topic相关配置
+      logStartOffset = logStartOffset, // 日志起始偏移量
+      recoveryPoint = logRecoveryPoint, // 恢复点偏移量
+      maxTransactionTimeoutMs = maxTransactionTimeoutMs, // 事务超时时间
+      producerStateManagerConfig = producerStateManagerConfig, // 生产者状态管理器配置
+      producerIdExpirationCheckIntervalMs = producerIdExpirationCheckIntervalMs, // 生产者ID过期检查间隔
+      scheduler = scheduler, // 调度器
+      time = time, // SystemTime 工具类
+      brokerTopicStats = brokerTopicStats, // BrokerTopicStats 实例
+      logDirFailureChannel = logDirFailureChannel, // 失败处理器
+      lastShutdownClean = hadCleanShutdown, // 是否正常关闭
+      topicId = None, // 主题ID
+      keepPartitionMetadataFile = keepPartitionMetadataFile, // 是否保留分区元数据文件
+      numRemainingSegments = numRemainingSegments // 剩余日志段数量
+    )
 
+    // mark 检查日志目录是否标记为删除
     if (logDir.getName.endsWith(UnifiedLog.DeleteDirSuffix)) {
+      // mark 添加到删除日志记录
       addLogToBeDeleted(log)
     } else {
+      // mark 将日志添加到当前日志或未来日志映射中（如果存在重复日志 put的话是会返回之前的key）
       val previous = {
-        if (log.isFuture)
+        if (log.isFuture) {
+          // mark 添加到未来日志
           this.futureLogs.put(topicPartition, log)
-        else
+        } else {
+          // mark 添加到当前日志
           this.currentLogs.put(topicPartition, log)
+        }
       }
+
+      // mark 重复日志处理
       if (previous != null) {
         if (log.isFuture)
-          throw new IllegalStateException(s"Duplicate log directories found: ${log.dir.getAbsolutePath}, ${previous.dir.getAbsolutePath}")
+          throw new IllegalStateException(s"发现重复的日志目录: ${log.dir.getAbsolutePath}, ${previous.dir.getAbsolutePath}")
         else
-          throw new IllegalStateException(s"Duplicate log directories for $topicPartition are found in both ${log.dir.getAbsolutePath} " +
-            s"and ${previous.dir.getAbsolutePath}. It is likely because log directory failure happened while broker was " +
-            s"replacing current replica with future replica. Recover broker from this failure by manually deleting one of the two directories " +
-            s"for this partition. It is recommended to delete the partition in the log directory that is known to have failed recently.")
+          throw new IllegalStateException(s"在 ${log.dir.getAbsolutePath} 和 ${previous.dir.getAbsolutePath} 中都发现了 $topicPartition 的重复日志目录。" +
+            s"这可能是因为在代理用未来副本替换当前副本时日志目录故障。通过手动删除该分区的两个目录之一来从故障中恢复代理。" +
+            s"建议删除最近已知故障的日志目录中的分区。")
       }
     }
 
@@ -346,11 +376,14 @@ class LogManager(logDirs: Seq[File],
   private def logRecoveryThreadName(dirPath: String, threadNum: Int, prefix: String = "log-recovery"): String = s"$prefix-$dirPath-$threadNum"
 
   /*
-   * decrement the number of remaining logs
-   * @return the number of remaining logs after decremented 1
+   * mark 减少kafka待加载剩余日志的数量。
+   * @param numRemainingLogs 一个包含每个路径剩余日志数量的并发映射。
+   * @param path 需要减少剩余日志数量的路径。
+   * @return 减少 1 后的剩余日志数量。
+   * @throws IllegalArgumentException 如果路径为空。
    */
   private[log] def decNumRemainingLogs(numRemainingLogs: ConcurrentMap[String, Int], path: String): Int = {
-    require(path != null, "path cannot be null to update remaining logs metric.")
+    require(path != null, "path 不能为空，以更新剩余日志的指标。")
     numRemainingLogs.compute(path, (_, oldVal) => oldVal - 1)
   }
 
@@ -430,19 +463,26 @@ class LogManager(logDirs: Seq[File],
             warn(s"Error occurred while reading log-start-offset-checkpoint file of directory " +
               s"$logDirAbsolutePath, resetting to the base offset of the first segment", e)
         }
-
+        // mark 加载所有日志文件夹Array(File) UnifiedLog.parseTopicPartitionName(logDir) 会将文件夹转换为 TopicPartition
+        //  1.必须为文件夹
+        //  2.UnifiedLog.parseTopicPartitionName解析的topic名称不为 __cluster_metadata
         val logsToLoad = Option(dir.listFiles).getOrElse(Array.empty).filter(logDir =>
           logDir.isDirectory && UnifiedLog.parseTopicPartitionName(logDir).topic != KafkaRaftServer.MetadataTopic)
+        // mark 保存日志总数
         numTotalLogs += logsToLoad.length
+        // mark 保存每个文件的日志总量（待加载）
         numRemainingLogs.put(logDirAbsolutePath, logsToLoad.length)
+        // mark 保存日志完成标志位
         loadLogsCompletedFlags.put(logDirAbsolutePath, logsToLoad.isEmpty)
 
+        // mark 为每个topic文件夹生成线程任务（加载日志）
         val jobsForDir = logsToLoad.map { logDir =>
           val runnable: Runnable = () => {
             debug(s"Loading log $logDir")
             var log = None: Option[UnifiedLog]
             val logLoadStartMs = time.hiResClockMs()
             try {
+              // mark 加载日志
               log = Some(loadLog(logDir, hadCleanShutdown, recoveryPoints, logStartOffsets,
                 defaultConfig, topicConfigOverrides, numRemainingSegments))
             } catch {
@@ -452,15 +492,18 @@ class LogManager(logDirs: Seq[File],
               // KafkaStorageException 可能会被抛出，例如在写入 LeaderEpochFileCache 时
               // 并且在将 IOException 转换为 KafkaStorageException 时，我们已经处理了异常。因此，我们可以忽略它。
             } finally {
+              // mark 记录加载时长
               val logLoadDurationMs = time.hiResClockMs() - logLoadStartMs
+              // mark 记录剩余待加载topic 日志文件夹数量
               val remainingLogs = decNumRemainingLogs(numRemainingLogs, logDirAbsolutePath)
               val currentNumLoaded = logsToLoad.length - remainingLogs
+              // mark 打印加载日志
               log match {
                 case Some(loadedLog) => info(s"Completed load of $loadedLog with ${loadedLog.numberOfSegments} segments in ${logLoadDurationMs}ms " +
                   s"($currentNumLoaded/${logsToLoad.length} completed in $logDirAbsolutePath)")
                 case None => info(s"Error while loading logs in $logDir in ${logLoadDurationMs}ms ($currentNumLoaded/${logsToLoad.length} completed in $logDirAbsolutePath)")
               }
-
+              // mark 如果全部加载完毕则当前日志文件夹添加加载完毕标志位
               if (remainingLogs == 0) {
                 // loadLog 在 logDir 下的所有日志完成后，标记它。
                 loadLogsCompletedFlags.put(logDirAbsolutePath, true)
@@ -469,7 +512,7 @@ class LogManager(logDirs: Seq[File],
           }
           runnable
         }
-
+        // mark 将Runnable提交到线程池 并将Future添加到jobs用于后续获取结果
         jobs += jobsForDir.map(pool.submit)
       } catch {
         case e: IOException =>
@@ -478,11 +521,13 @@ class LogManager(logDirs: Seq[File],
     }
 
     try {
+      // mark 添加日志加载的监控指标
       addLogRecoveryMetrics(numRemainingLogs, numRemainingSegments)
+      // mark 等待所有任务执行完毕（没有返回值）
       for (dirJobs <- jobs) {
         dirJobs.foreach(_.get)
       }
-
+      // mark 离线日志文件夹处理
       offlineDirs.foreach { case (dir, e) =>
         logDirFailureChannel.maybeAddOfflineLogDir(dir, s"Error while loading log dir $dir", e)
       }
@@ -491,6 +536,7 @@ class LogManager(logDirs: Seq[File],
         error(s"There was an error in one of the threads during logs loading: ${e.getCause}")
         throw e.getCause
     } finally {
+      // mark 移除日志恢复指标以及关闭线程池
       removeLogRecoveryMetrics()
       threadPools.foreach(_.shutdown())
     }

@@ -625,11 +625,10 @@ object LocalLog extends Logging {
   private[log] val UnknownOffset = -1L
 
   /**
-   * Make log segment file name from offset bytes. All this does is pad out the offset number with zeros
-   * so that ls sorts the files numerically.
+   * mark 根据偏移量字节生成日志段文件名。此方法通过用零填充偏移量数字，使得 ls 命令能够按数字顺序排序文件。
    *
-   * @param offset The offset to use in the file name
-   * @return The filename
+   * @param offset 用于文件名的偏移量
+   * @return 文件名
    */
   private[log] def filenamePrefixFromOffset(offset: Long): String = {
     val nf = NumberFormat.getInstance()
@@ -640,11 +639,11 @@ object LocalLog extends Logging {
   }
 
   /**
-   * Construct a log file name in the given dir with the given base offset and the given suffix
+   * mark 构造一个位于给定目录中的日志文件名，该日志文件名具有指定的基础偏移量和后缀。
    *
-   * @param dir The directory in which the log will reside
-   * @param offset The base offset of the log file
-   * @param suffix The suffix to be appended to the file name (e.g. "", ".deleted", ".cleaned", ".swap", etc.)
+   * @param dir    日志文件所在的目录
+   * @param offset 日志文件的基础偏移量
+   * @param suffix 要附加到文件名的后缀（例如: "", ".deleted", ".cleaned", ".swap" 等）
    */
   private[log] def logFile(dir: File, offset: Long, suffix: String = ""): File =
     new File(dir, filenamePrefixFromOffset(offset) + LogFileSuffix + suffix)
@@ -722,7 +721,11 @@ object LocalLog extends Logging {
   }
 
   /**
-   * Parse the topic and partition out of the directory name of a log
+   * 解析日志目录名中的主题和分区信息。
+   *
+   * @param dir 表示日志目录的文件对象。
+   * @return 从目录名解析出的 TopicPartition 对象。
+   * @throws KafkaException 如果目录名格式不正确或为 null，抛出此异常。
    */
   private[log] def parseTopicPartitionName(dir: File): TopicPartition = {
     if (dir == null)
@@ -758,11 +761,28 @@ object LocalLog extends Logging {
     new TopicPartition(topic, partition)
   }
 
+  /**
+   * 判断给定文件是否为索引文件。
+   *
+   * 索引文件包括三种类型：普通索引文件、时间索引文件和事务索引文件。
+   *
+   * @param file 要检查的文件
+   * @return 如果文件是索引文件，则返回 true；否则返回 false
+   */
   private[log] def isIndexFile(file: File): Boolean = {
     val filename = file.getName
+    // 判断文件名是否以索引文件后缀结尾
     filename.endsWith(IndexFileSuffix) || filename.endsWith(TimeIndexFileSuffix) || filename.endsWith(TxnIndexFileSuffix)
   }
 
+  /**
+   * 判断给定文件是否为日志文件。
+   *
+   * 日志文件的文件路径以指定的日志文件后缀结尾。
+   *
+   * @param file 要检查的文件
+   * @return 如果文件是日志文件，则返回 true；否则返回 false
+   */
   private[log] def isLogFile(file: File): Boolean =
     file.getPath.endsWith(LogFileSuffix)
 
