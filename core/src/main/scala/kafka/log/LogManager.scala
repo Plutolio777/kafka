@@ -76,26 +76,32 @@ class LogManager(logDirs: Seq[File],
 
   import LogManager._
 
-  val InitialTaskDelayMs = 30 * 1000
+  val InitialTaskDelayMs = 30 * 1000 // mark 初始任务延时为30s
 
-  private val logCreationOrDeletionLock = new Object
-  private val currentLogs = new Pool[TopicPartition, UnifiedLog]()
+  private val logCreationOrDeletionLock = new Object // mark 日志创建或者删除使用对象锁
+  private val currentLogs = new Pool[TopicPartition, UnifiedLog]() // mark 当前日志对象池
   // Future logs are put in the directory with "-future" suffix. Future log is created when user wants to move replica
   // from one log directory to another log directory on the same broker. The directory of the future log will be renamed
   // to replace the current log of the partition after the future log catches up with the current log
-  private val futureLogs = new Pool[TopicPartition, UnifiedLog]()
+  private val futureLogs = new Pool[TopicPartition, UnifiedLog]() // mark 在同一个broker上如果用户想要将一个副本从一个日志目录移动到另一个日志目录时会创建
   // Each element in the queue contains the log object to be deleted and the time it is scheduled for deletion.
-  private val logsToBeDeleted = new LinkedBlockingQueue[(UnifiedLog, Long)]()
+  private val logsToBeDeleted = new LinkedBlockingQueue[(UnifiedLog, Long)]() // mark 需要删除的日志对象会放在一个链队列中
 
+  // mark 检查logDirs 确保有可以用的日志文件夹
   private val _liveLogDirs: ConcurrentLinkedQueue[File] = createAndValidateLogDirs(logDirs, initialOfflineDirs)
+  // mark 日志相关的所有配置项
   @volatile private var _currentDefaultConfig = initialDefaultConfig
+  // mark 每个日志文件夹分配的恢复线程数
   @volatile private var numRecoveryThreadsPerDataDir = recoveryThreadsPerDataDir
 
-  // This map contains all partitions whose logs are getting loaded and initialized. If log configuration
-  // of these partitions get updated at the same time, the corresponding entry in this map is set to "true",
-  // which triggers a config reload after initialization is finished (to get the latest config value).
-  // See KAFKA-8813 for more detail on the race condition
-  // Visible for testing
+  /**
+   * 这个映射包含了所有正在加载和初始化日志的分区。
+   * 在这些分区的日志初始化过程中，如果它们的日志配置被更新，则映射中的对应条目将被设置为 "true"。
+   * 这将触发在初始化完成后重新加载配置，以获取最新的配置值。
+   * 详见 KAFKA-8813，了解更多关于竞争条件的详细信息。
+   *
+   * @note 这个变量在测试中是可见的。
+   */
   private[log] val partitionsInitializing = new ConcurrentHashMap[TopicPartition, Boolean]().asScala
 
   def reconfigureDefaultLogConfig(logConfig: LogConfig): Unit = {
@@ -111,15 +117,20 @@ class LogManager(logDirs: Seq[File],
       _liveLogDirs.asScala.toBuffer
   }
 
+  // mark 获取所有日志文件夹锁
   private val dirLocks = lockLogDirs(liveLogDirs)
+
+
   // mark 用于加载日志文件夹中的 recovery-point-offset-checkpoint 文件
   @volatile private var recoveryPointCheckpoints = liveLogDirs.map(dir =>
     // mark RecoveryPointCheckpointFile:recovery-point-offset-checkpoint
     (dir, new OffsetCheckpointFile(new File(dir, RecoveryPointCheckpointFile), logDirFailureChannel))).toMap
+
   // mark 用于加载日志文件夹中的 log-start-offset-checkpoint 文件
   @volatile private var logStartOffsetCheckpoints = liveLogDirs.map(dir =>
     (dir, new OffsetCheckpointFile(new File(dir, LogStartOffsetCheckpointFile), logDirFailureChannel))).toMap
 
+  // mark 首选日志文件夹
   private val preferredLogDirs = new ConcurrentHashMap[TopicPartition, String]()
 
   private def offlineLogDirs: Iterable[File] = {
@@ -129,12 +140,16 @@ class LogManager(logDirs: Seq[File],
   }
 
   // A map that stores hadCleanShutdown flag for each log dir.
+  // mark 用于存储每个日志文件夹是否正常退出标志
   private val hadCleanShutdownFlags = new ConcurrentHashMap[String, Boolean]()
 
   // A map that tells whether all logs in a log dir had been loaded or not at startup time.
+  // mark 日志文件夹加载完毕标志
   private val loadLogsCompletedFlags = new ConcurrentHashMap[String, Boolean]()
 
+  // mark 日志清理器
   @volatile private var _cleaner: LogCleaner = _
+
   private[kafka] def cleaner: LogCleaner = _cleaner
 
   newGauge("OfflineLogDirectoryCount", () => offlineLogDirs.size)
@@ -146,50 +161,65 @@ class LogManager(logDirs: Seq[File],
   }
 
   /**
-   * Create and check validity of the given directories that are not in the given offline directories, specifically:
+   * 创建并验证给定的日志目录，这些目录不应在指定的离线目录列表中。具体来说，该方法执行以下操作：
    * <ol>
-   * <li> Ensure that there are no duplicates in the directory list
-   * <li> Create each directory if it doesn't exist
-   * <li> Check that each path is a readable directory
+   * <li> 确保目录列表中没有重复项
+   * <li> 如果目录不存在，则创建该目录
+   * <li> 检查每个路径是否为可读目录
    * </ol>
+   *
+   * @param dirs               包含要创建和验证的日志目录的 `Seq[File]` 列表。
+   * @param initialOfflineDirs 包含初始离线目录的 `Seq[File]` 列表，这些目录在检查过程中会被忽略。
+   * @return 一个包含所有有效日志目录的 `ConcurrentLinkedQueue[File]`。
+   * @throws IOException    如果在创建或验证目录时遇到问题，会抛出该异常。
+   * @throws KafkaException 如果目录列表中存在重复的目录，会抛出该异常。
    */
   private def createAndValidateLogDirs(dirs: Seq[File], initialOfflineDirs: Seq[File]): ConcurrentLinkedQueue[File] = {
+    // mark 创建一个线程安全的队列来存储有效的日志目录。
     val liveLogDirs = new ConcurrentLinkedQueue[File]()
+    // mark 使用一个可变集合来跟踪目录的规范化路径，确保没有重复的路径。
     val canonicalPaths = mutable.HashSet.empty[String]
 
+    // mark 遍历所有指定的目录。
     for (dir <- dirs) {
       try {
+        // mark 如果目录在初始离线目录列表中，抛出异常。
         if (initialOfflineDirs.contains(dir))
           throw new IOException(s"Failed to load ${dir.getAbsolutePath} during broker startup")
 
+        // mark 如果目录不存在，尝试创建它。
         if (!dir.exists) {
           info(s"Log directory ${dir.getAbsolutePath} not found, creating it.")
           val created = dir.mkdirs()
+          // 如果创建失败，抛出异常。
           if (!created)
             throw new IOException(s"Failed to create data directory ${dir.getAbsolutePath}")
+          // mark 刷新父目录，确保所有更改都被写入磁盘。(调用了 channel.force方法进行刷盘)
           Utils.flushDir(dir.toPath.toAbsolutePath.normalize.getParent)
         }
+        // mark 不为文件夹或者不可读则抛出异常。
         if (!dir.isDirectory || !dir.canRead)
           throw new IOException(s"${dir.getAbsolutePath} is not a readable log directory.")
 
-        // getCanonicalPath() throws IOException if a file system query fails or if the path is invalid (e.g. contains
-        // the Nul character). Since there's no easy way to distinguish between the two cases, we treat them the same
-        // and mark the log directory as offline.
+        // mark 获取目录的规范化路径，确保没有重复的路径。 (如果 `getCanonicalPath` 抛出异常，我们将该目录标记为离线。)
         if (!canonicalPaths.add(dir.getCanonicalPath))
           throw new KafkaException(s"Duplicate log directory found: ${dirs.mkString(", ")}")
 
-
+        // mark 将有效的目录添加到 `liveLogDirs` 队列中。
         liveLogDirs.add(dir)
       } catch {
+        // 捕获 `IOException` 异常并将目录标记为离线，同时记录错误信息。
         case e: IOException =>
           logDirFailureChannel.maybeAddOfflineLogDir(dir.getAbsolutePath, s"Failed to create or validate data directory ${dir.getAbsolutePath}", e)
       }
     }
+    // mark 如果没有任何有效的日志目录，记录致命错误并终止代理。
     if (liveLogDirs.isEmpty) {
       fatal(s"Shutdown broker because none of the specified log dirs from ${dirs.mkString(", ")} can be created or validated")
       Exit.halt(1)
     }
 
+    // mark 返回所有有效的日志目录。
     liveLogDirs
   }
 
@@ -241,7 +271,7 @@ class LogManager(logDirs: Seq[File],
   }
 
   /**
-   * Lock all the given directories
+   * mark 锁定所有给定的日志文件夹
    */
   private def lockLogDirs(dirs: Seq[File]): Seq[FileLock] = {
     dirs.flatMap { dir =>
@@ -281,12 +311,13 @@ class LogManager(logDirs: Seq[File],
    *
    * @throws IllegalStateException 如果发现重复的日志目录。
    */
-  private[log] def loadLog(logDir: File,
-                           hadCleanShutdown: Boolean,
-                           recoveryPoints: Map[TopicPartition, Long],
-                           logStartOffsets: Map[TopicPartition, Long],
-                           defaultConfig: LogConfig,
-                           topicConfigOverrides: Map[String, LogConfig],
+  private[log] def loadLog(logDir: File, // mark 加载的分区文件夹
+                           hadCleanShutdown: Boolean, // mark 主日志文件夹是否正常关闭标志
+                           recoveryPoints: Map[TopicPartition, Long], // mark 恢复检查点
+                           logStartOffsets: Map[TopicPartition, Long], // 起始偏移量检查点
+                           defaultConfig: LogConfig, // mark 默认日志配置
+                           topicConfigOverrides: Map[String, LogConfig], // mark topic层级相关配置
+                           // mark 剩余待加载segment数量
                            numRemainingSegments: ConcurrentMap[String, Int]): UnifiedLog = {
 
     // mark 解析日志目录以获取主题分区(根据文件夹名称获得Topic-Partition对象)
@@ -299,7 +330,7 @@ class LogManager(logDirs: Seq[File],
     val logRecoveryPoint = recoveryPoints.getOrElse(topicPartition, 0L)
     val logStartOffset = logStartOffsets.getOrElse(topicPartition, 0L)
 
-    // 创建 UnifiedLog 实例
+    // mark 这个里面会进行日志的加载 创建 UnifiedLog 实例
     val log = UnifiedLog(
       dir = logDir, // topic-partition日志目录
       config = config, // topic相关配置
@@ -375,8 +406,9 @@ class LogManager(logDirs: Seq[File],
   // create a unique log recovery thread name for each log dir as the format: prefix-dirPath-threadNum, ex: "log-recovery-/tmp/kafkaLogs-0"
   private def logRecoveryThreadName(dirPath: String, threadNum: Int, prefix: String = "log-recovery"): String = s"$prefix-$dirPath-$threadNum"
 
-  /*
+  /**
    * mark 减少kafka待加载剩余日志的数量。
+   *
    * @param numRemainingLogs 一个包含每个路径剩余日志数量的并发映射。
    * @param path 需要减少剩余日志数量的路径。
    * @return 减少 1 后的剩余日志数量。
@@ -388,28 +420,28 @@ class LogManager(logDirs: Seq[File],
   }
 
   /**
-   * 恢复并加载给定数据目录中的所有日志
+   * mark 恢复并加载给定数据目录中的所有日志
    *
    * @param defaultConfig        默认日志配置
    * @param topicConfigOverrides 主题配置覆盖映射
    */
   private[log] def loadLogs(defaultConfig: LogConfig, topicConfigOverrides: Map[String, LogConfig]): Unit = {
-    info(s"Loading logs from log dirs $liveLogDirs")
+    info(s"Loading logs from log dirs $liveLogDirs") // mark 加载日志只会针对live dirs
     // mark 记录开始时间戳
     val startMs = time.hiResClockMs()
     // mark 初始化线程池数组 每个数据文件夹都有一个线程池 保存在这个里面
     val threadPools = ArrayBuffer.empty[ExecutorService]
-    // mark 初始化离线目录集合
+    // mark 初始化离线目录集合（加载日志过程中发现的离线日志文件夹）
     val offlineDirs = mutable.Set.empty[(String, IOException)]
     // mark 初始化恢复线程实例容器
     val jobs = ArrayBuffer.empty[Seq[Future[_]]]
     var numTotalLogs = 0
-    // mark 日志目录路径到剩余日志数量的映射，用于 remainingLogsToRecover 度量
+    // mark 日志文件夹中剩余待加载topic的数量
     val numRemainingLogs: ConcurrentMap[String, Int] = new ConcurrentHashMap[String, Int]
     // mark 日志恢复线程名称到剩余段数量的映射，用于 remainingSegmentsToRecover 度量
     val numRemainingSegments: ConcurrentMap[String, Int] = new ConcurrentHashMap[String, Int]
 
-    // mark 报告IO异常的方法
+    // mark 报告IO异常的方法 （如果发生IC操作增加到offlineDirs中）
     def handleIOException(logDirAbsolutePath: String, e: IOException): Unit = {
       offlineDirs.add((logDirAbsolutePath, e))
       error(s"Error while loading log dir $logDirAbsolutePath", e)
@@ -426,7 +458,7 @@ class LogManager(logDirs: Seq[File],
           new LogRecoveryThreadFactory(logDirAbsolutePath))
         // mark 缓存生成的线程池
         threadPools.append(pool)
-        // mark 该文件是用来标志kafka是否为正常关闭
+        // mark 该文件是用来标志kafka是否为正常关闭 （${日志文件夹}.kafka_cleanshutdown）
         // mark Kafka 服务器在接收到关闭信号时，会执行一系列关闭操作，包括将所有未写入的数据刷到磁盘、关闭所有活动的文件句柄等。
         //  完成这些操作后，会在每个日志目录中创建或更新 .kafka_cleanshutdown 文件。
         val cleanShutdownFile = new File(dir, LogLoader.CleanShutdownFile)
@@ -444,6 +476,7 @@ class LogManager(logDirs: Seq[File],
         // mark 保存日志路径和是否正常关闭标志位
         hadCleanShutdownFlags.put(logDirAbsolutePath, hadCleanShutdown)
 
+        // mark 加载偏移量检查点数据（恢复点偏移量是 Kafka 在崩溃或重启后，可以从磁盘安全恢复的最早偏移量。）
         var recoveryPoints = Map[TopicPartition, Long]()
         try {
           // mark 读取恢复检查点(recovery-point-offset-checkpoint)文件生成 Map<Set(TopicPartition, Offset)> 对象
@@ -454,6 +487,7 @@ class LogManager(logDirs: Seq[File],
               s"$logDirAbsolutePath, resetting the recovery checkpoint to 0", e)
         }
 
+        // mark 加载初始偏移量检查点数据（记录了每个分区的初始偏移量）
         var logStartOffsets = Map[TopicPartition, Long]()
         try {
           // mark 读取恢复检查点(log-start-offset-checkpoint)文件生成 Map<Set(TopicPartition, Offset)> 对象
@@ -463,14 +497,16 @@ class LogManager(logDirs: Seq[File],
             warn(s"Error occurred while reading log-start-offset-checkpoint file of directory " +
               s"$logDirAbsolutePath, resetting to the base offset of the first segment", e)
         }
+
+
         // mark 加载所有日志文件夹Array(File) UnifiedLog.parseTopicPartitionName(logDir) 会将文件夹转换为 TopicPartition
         //  1.必须为文件夹
         //  2.UnifiedLog.parseTopicPartitionName解析的topic名称不为 __cluster_metadata
         val logsToLoad = Option(dir.listFiles).getOrElse(Array.empty).filter(logDir =>
           logDir.isDirectory && UnifiedLog.parseTopicPartitionName(logDir).topic != KafkaRaftServer.MetadataTopic)
-        // mark 保存日志总数
+        // mark 保存日志（分区）总数
         numTotalLogs += logsToLoad.length
-        // mark 保存每个文件的日志总量（待加载）
+        // mark 保存每个文件的日志（分区）总量（待加载）
         numRemainingLogs.put(logDirAbsolutePath, logsToLoad.length)
         // mark 保存日志完成标志位
         loadLogsCompletedFlags.put(logDirAbsolutePath, logsToLoad.isEmpty)
@@ -579,6 +615,7 @@ class LogManager(logDirs: Seq[File],
 
   /**
    * mark 获取每个主题相关的配置并覆盖默认配置
+   *
    * 该方法用于获取特定主题的配置覆盖，并返回一个映射，其中键是主题名称，值是对应的日志配置。
    * 该方法在测试中可见。
    *
@@ -626,8 +663,14 @@ class LogManager(logDirs: Seq[File],
     fetchTopicConfigOverrides(defaultConfig, Set(topicName)).values.headOption.getOrElse(defaultConfig)
   }
 
-  // visible for testing
+  /**
+   * mark 启动日志管理器主要逻辑
+   *
+   * @param defaultConfig        默认日志相关的配置
+   * @param topicConfigOverrides topic层级的相关配置映射 Map<TopicName, LogConfig>
+   */
   private[log] def startupWithConfigOverrides(defaultConfig: LogConfig, topicConfigOverrides: Map[String, LogConfig]): Unit = {
+    // mark 加载日志
     loadLogs(defaultConfig, topicConfigOverrides) // this could take a while if shutdown was not clean
 
     /* Schedule the cleanup task to delete old logs */
@@ -1491,7 +1534,7 @@ object LogManager {
     val defaultProps = LogConfig.extractLogConfigMap(config)
     // mark 对配置进行相关的验证
     LogConfig.validateValues(defaultProps)
-    // mark 生成LogConfig对象
+    // mark 生成LogConfig对象（先server.properties文件中的配置作为默认配置）
     val defaultLogConfig = LogConfig(defaultProps)
 
     // mark 获取日志清理器配置
@@ -1499,24 +1542,24 @@ object LogManager {
 
     // mark 创建并返回 LogManager 实例
     new LogManager(
-      logDirs = config.logDirs.map(new File(_).getAbsoluteFile),
-      initialOfflineDirs = initialOfflineDirs.map(new File(_).getAbsoluteFile),
-      configRepository = configRepository,
-      initialDefaultConfig = defaultLogConfig,
-      cleanerConfig = cleanerConfig,
-      recoveryThreadsPerDataDir = config.numRecoveryThreadsPerDataDir,
-      flushCheckMs = config.logFlushSchedulerIntervalMs,
-      flushRecoveryOffsetCheckpointMs = config.logFlushOffsetCheckpointIntervalMs,
-      flushStartOffsetCheckpointMs = config.logFlushStartOffsetCheckpointIntervalMs,
-      retentionCheckMs = config.logCleanupIntervalMs,
-      maxTransactionTimeoutMs = config.transactionMaxTimeoutMs,
-      producerStateManagerConfig = new ProducerStateManagerConfig(config.producerIdExpirationMs),
-      producerIdExpirationCheckIntervalMs = config.producerIdExpirationCheckIntervalMs,
-      scheduler = kafkaScheduler,
-      brokerTopicStats = brokerTopicStats,
-      logDirFailureChannel = logDirFailureChannel,
-      time = time,
-      keepPartitionMetadataFile = keepPartitionMetadataFile,
+      logDirs = config.logDirs.map(new File(_).getAbsoluteFile), // 日志文件夹绝对路径
+      initialOfflineDirs = initialOfflineDirs.map(new File(_).getAbsoluteFile), // 离线文件夹绝对路径
+      configRepository = configRepository, // zookeeper配置仓库
+      initialDefaultConfig = defaultLogConfig, // LogConfig日志配置对象
+      cleanerConfig = cleanerConfig, // 日志清理器配置
+      recoveryThreadsPerDataDir = config.numRecoveryThreadsPerDataDir, // 每个日志文件夹恢复线程数
+      flushCheckMs = config.logFlushSchedulerIntervalMs, // 日志刷新调度时间间隔
+      flushRecoveryOffsetCheckpointMs = config.logFlushOffsetCheckpointIntervalMs, // 偏移量检查点刷新间隔
+      flushStartOffsetCheckpointMs = config.logFlushStartOffsetCheckpointIntervalMs, // 起始偏移量检查点刷新间隔
+      retentionCheckMs = config.logCleanupIntervalMs, // 日志清理时间间隔
+      maxTransactionTimeoutMs = config.transactionMaxTimeoutMs, // 事务最大超时时间
+      producerStateManagerConfig = new ProducerStateManagerConfig(config.producerIdExpirationMs), // 生产者状态管理配置
+      producerIdExpirationCheckIntervalMs = config.producerIdExpirationCheckIntervalMs, // 生产者状态过期时间间隔
+      scheduler = kafkaScheduler, // kafka调度器
+      brokerTopicStats = brokerTopicStats, // topic状态管理器
+      logDirFailureChannel = logDirFailureChannel, // 日志文件夹加载失败处理器
+      time = time, // 实践操作工具类
+      keepPartitionMetadataFile = keepPartitionMetadataFile, // ?
       interBrokerProtocolVersion = config.interBrokerProtocolVersion
     )
   }

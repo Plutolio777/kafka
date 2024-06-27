@@ -188,6 +188,7 @@ class TimeIndex(_file: File, baseOffset: Long, maxIndexSize: Int = -1, writable:
 
   override def resize(newSize: Int): Boolean = {
     inLock(lock) {
+      // mark 重置索引文件
       if (super.resize(newSize)) {
         _lastEntry = lastEntryFromIndexFile
         true

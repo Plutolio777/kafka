@@ -455,12 +455,31 @@ object ProducerStateManager {
     }
   }
 
+  /**
+   * 检查文件是否为快照文件。
+   *
+   * 该方法通过检查文件名是否以指定的快照文件后缀结尾来判断文件是否为快照文件。
+   *
+   * @param file 要检查的文件。
+   * @return 如果文件名以快照文件后缀结尾，则返回 true，否则返回 false。
+   */
   private def isSnapshotFile(file: File): Boolean = file.getName.endsWith(UnifiedLog.ProducerSnapshotFileSuffix)
 
-  // visible for testing
+  /**
+   * 列出指定目录中的所有快照文件。
+   *
+   * 该方法检查指定的目录是否存在且为目录。如果目录存在，
+   * 它将列出目录中的所有文件，过滤出仅包括被识别为快照文件的文件，
+   * 然后将这些文件映射为 SnapshotFile 对象。
+   *
+   * @param dir 要列出快照文件的目录。
+   * @return 表示目录中快照文件的 SnapshotFile 对象序列。
+   *         如果目录不存在或不是目录，则返回空序列。
+   */
   private[log] def listSnapshotFiles(dir: File): Seq[SnapshotFile] = {
     if (dir.exists && dir.isDirectory) {
       Option(dir.listFiles).map { files =>
+        // mark  满足条件 1.是文件 2.是快照文件（以.snapshot结尾）
         files.filter(f => f.isFile && isSnapshotFile(f)).map(SnapshotFile(_)).toSeq
       }.getOrElse(Seq.empty)
     } else Seq.empty
@@ -525,7 +544,9 @@ class ProducerStateManager(
    * Load producer state snapshots by scanning the _logDir.
    */
   private def loadSnapshots(): ConcurrentSkipListMap[java.lang.Long, SnapshotFile] = {
+    // mark 创建跳表来维护快照
     val tm = new ConcurrentSkipListMap[java.lang.Long, SnapshotFile]()
+    // mark 遍历topic分区文件夹 然后加入跳表
     for (f <- listSnapshotFiles(_logDir)) {
       tm.put(f.offset, f)
     }
@@ -935,8 +956,18 @@ case class SnapshotFile private[log] (@volatile private var _file: File,
 }
 
 object SnapshotFile {
+  /**
+   * 创建一个 SnapshotFile 实例。
+   *
+   * 该方法从指定的文件中提取偏移量，并使用文件和偏移量来构造一个 SnapshotFile 对象。
+   *
+   * @param file 用于创建 SnapshotFile 实例的文件。
+   * @return 一个包含文件和从文件中提取的偏移量的 SnapshotFile 对象。
+   */
   def apply(file: File): SnapshotFile = {
+    // mark 从文件名中获取基础偏移量
     val offset = offsetFromFile(file)
+    // mark 创建快照文件对象
     SnapshotFile(file, offset)
   }
 }

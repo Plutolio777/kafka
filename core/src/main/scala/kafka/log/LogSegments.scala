@@ -72,7 +72,9 @@ class LogSegments(topicPartition: TopicPartition) {
   def clear(): Unit = segments.clear()
 
   /**
-   * Close all segments.
+   * mark 关闭所有段。
+   *
+   * 该方法遍历所有的段，并调用它们的 `close` 方法以关闭它们。
    */
   def close(): Unit = values.foreach(_.close())
 
@@ -125,16 +127,21 @@ class LogSegments(topicPartition: TopicPartition) {
   def values: Iterable[LogSegment] = segments.values.asScala
 
   /**
-   * @return An iterator to all segments beginning with the segment that includes "from" and ending
-   *         with the segment that includes up to "to-1" or the end of the log (if to > end of log).
+   * mark 指定偏移量范围获取segment迭代器用于遍历segment
+   * 返回一个迭代器，该迭代器包含从包含 "from" 的段开始到包含 "to-1" 的段或日志结束（如果 to 大于日志结束）为止的所有段。
+   *
+   * @param from 开始的偏移量。
+   * @param to   结束的偏移量。
+   * @return 从包含 "from" 的段开始到包含 "to-1" 的段或日志结束的所有段的可迭代集合。
+   * @throws IllegalArgumentException 如果 "to" 小于 "from"，抛出非法参数异常。
    */
   def values(from: Long, to: Long): Iterable[LogSegment] = {
+    // mark 起始位置相等返回空集合
     if (from == to) {
-      // Handle non-segment-aligned empty sets
       List.empty[LogSegment]
     } else if (to < from) {
-      throw new IllegalArgumentException(s"Invalid log segment range: requested segments in $topicPartition " +
-        s"from offset $from which is greater than limit offset $to")
+      throw new IllegalArgumentException(s"无效的日志段范围：请求的段在 $topicPartition 中，" +
+        s"从偏移量 $from 开始大于限制偏移量 $to")
     } else {
       val view = Option(segments.floorKey(from)).map { floor =>
         segments.subMap(floor, to)

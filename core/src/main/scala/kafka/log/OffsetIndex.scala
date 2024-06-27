@@ -54,6 +54,7 @@ class OffsetIndex(_file: File, baseOffset: Long, maxIndexSize: Int = -1, writabl
     extends AbstractIndex(_file, baseOffset, maxIndexSize, writable) {
   import OffsetIndex._
 
+  // mark 偏移量索引 每一个索引条目为8个字节 前4个字节为相对偏移量 后四个字节为消息在segment文件中的物理地址
   override def entrySize = 8
 
   /* the last offset in the index */
@@ -63,12 +64,14 @@ class OffsetIndex(_file: File, baseOffset: Long, maxIndexSize: Int = -1, writabl
     s"maxIndexSize = $maxIndexSize, entries = ${_entries}, lastOffset = ${_lastOffset}, file position = ${mmap.position()}")
 
   /**
-   * The last entry in the index
+   * Index Entry 是由OffsetPosition表示
    */
   private def lastEntry: OffsetPosition = {
     inLock(lock) {
       _entries match {
+        // mark 返回初始entry
         case 0 => OffsetPosition(baseOffset, 0)
+
         case s => parseEntry(mmap, s - 1)
       }
     }
@@ -112,11 +115,41 @@ class OffsetIndex(_file: File, baseOffset: Long, maxIndexSize: Int = -1, writabl
     }
   }
 
-  private def relativeOffset(buffer: ByteBuffer, n: Int): Int = buffer.getInt(n * entrySize)
+  /**
+   * 从 mmap 中获取相对偏移量。
+   * index的entry为8字节 前4字节为相对偏移量所以直接getInt就行
+   *
+   * @param buffer ByteBuffer 对象，实际上是AbstractIndex中的mmap。
+   * @param n      要解析的条目的索引位置。
+   * @return 该条目的相对偏移量。
+   */
+  private def relativeOffset(buffer: ByteBuffer, n: Int): Int = {
+    // 从指定索引位置 n 处读取一个整数作为相对偏移量
+    buffer.getInt(n * entrySize)
+  }
 
-  private def physical(buffer: ByteBuffer, n: Int): Int = buffer.getInt(n * entrySize + 4)
+  /**
+   * 从 mmap 中获取物理位置。
+   * index的entry为8字节 后4字节为消息的物理地址
+   *
+   * @param buffer ByteBuffer 对象，实际上是AbstractIndex中的mmap。
+   * @param n      要解析的条目的索引位置。
+   * @return 该条目的物理位置。
+   */
+  private def physical(buffer: ByteBuffer, n: Int): Int = {
+    // 从指定索引位置 n 处加 4 字节偏移读取一个整数作为物理位置
+    buffer.getInt(n * entrySize + 4)
+  }
 
+  /**
+   * 解析索引条目并返回相应的偏移位置。
+   *
+   * @param buffer ByteBuffer 对象，包含索引文件的数据。
+   * @param n      要解析的条目的索引位置。
+   * @return 解析后的 OffsetPosition 对象，包含条目的偏移量和物理位置。
+   */
   override protected def parseEntry(buffer: ByteBuffer, n: Int): OffsetPosition = {
+    // mark 通过相对偏移量和物理位置计算条目的实际偏移量和位置
     OffsetPosition(baseOffset + relativeOffset(buffer, n), physical(buffer, n))
   }
 
@@ -135,23 +168,29 @@ class OffsetIndex(_file: File, baseOffset: Long, maxIndexSize: Int = -1, writabl
   }
 
   /**
-   * Append an entry for the given offset/location pair to the index. This entry must have a larger offset than all subsequent entries.
-   * @throws kafka.common.IndexOffsetOverflowException if the offset causes index offset to overflow
-   * @throws InvalidOffsetException if provided offset is not larger than the last offset
+   * mark 添加偏移量索引
+   *
+   * @param offset   要追加的条目的偏移量
+   * @param position 要追加的条目的位置
+   * @throws kafka.common.IndexOffsetOverflowException 如果偏移量导致索引偏移量溢出
+   * @throws InvalidOffsetException                    如果提供的偏移量不大于最后一个偏移量
    */
   def append(offset: Long, position: Int): Unit = {
     inLock(lock) {
-      require(!isFull, "Attempt to append to a full index (size = " + _entries + ").")
+      // mark 检查索引文件是否已满
+      require(!isFull, "尝试向已满的索引追加条目 (大小 = " + _entries + ")。")
       if (_entries == 0 || offset > _lastOffset) {
-        trace(s"Adding index entry $offset => $position to ${file.getAbsolutePath}")
+        trace(s"将索引条目 $offset => $position 添加到 ${file.getAbsolutePath}")
+        // mark 通过mmap向文件中写入offset
         mmap.putInt(relativeOffset(offset))
+        // mark 通过mmap向文件中写入物理地址
         mmap.putInt(position)
         _entries += 1
         _lastOffset = offset
-        require(_entries * entrySize == mmap.position(), s"$entries entries but file position in index is ${mmap.position()}.")
+        require(_entries * entrySize == mmap.position(), s"$entries 条目，但索引中文件位置是 ${mmap.position()}。")
       } else {
-        throw new InvalidOffsetException(s"Attempt to append an offset ($offset) to position $entries no larger than" +
-          s" the last offset appended (${_lastOffset}) to ${file.getAbsolutePath}.")
+        throw new InvalidOffsetException(s"尝试向位置 $entries 追加偏移量 ($offset) 不大于" +
+          s" 最后追加的偏移量 (${_lastOffset}) 到 ${file.getAbsolutePath}。")
       }
     }
   }

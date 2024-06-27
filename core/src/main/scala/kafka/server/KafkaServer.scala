@@ -163,6 +163,7 @@ class KafkaServer(
   @volatile var metadataCache: ZkMetadataCache = _
   var quotaManagers: QuotaFactory.QuotaManagers = _
 
+  // mark 从kafka全局配置中提取与zookeeper有关的配置（主要和sasl加密相关的配置）
   val zkClientConfig: ZKClientConfig = KafkaServer.zkClientConfigFromKafkaConfig(config)
   private var _zkClient: KafkaZkClient = _
   private var configRepository: ZkConfigRepository = _
@@ -224,13 +225,8 @@ class KafkaServer(
         /* setup zookeeper */
         // mark 初始化zookeeper client 创建一些必要的路径
         initZkClient(time)
-        // mark AdminZkClient 是 Kafka 中用于管理和操作 ZooKeeper 的一个工具类，通常在 Kafka 的管理工具或测试工具中使用。
-        // mark 它提供了一些方法，可以方便地在 ZooKeeper 中进行一些常见的 Kafka 管理操作，比如创建、删除和查询 Kafka 主题等。
-        // mark adminZkClient.createTopic(topicName, partitions, replication, topicConfig);
-        // mark adminZkClient.deleteTopic(topicName);
-        // mark 因为kafka有一些配置是一样的但是topic和broker又独立的配置 ZkConfigRepository 这个就是对上层的封装
-        // mark ZkConfigRepository可以提供是修改topic层面的配置还是broker层面的配置
-        configRepository = new ZkConfigRepository(new AdminZkClient(zkClient))
+        // mark 这个也是一层业务包装 用于专门用来获取配置（调用config方法，用于获取zookeeper层级的如topic或者broker配置）
+        configRepository = new ZkConfigRepository(new AdminZkClient(zkClient)) // 这个也是
 
         /* Get or create cluster_id */
         // mark 获取(如果已经存在)或者生成集群ID（uuid的base64编码）
@@ -282,25 +278,28 @@ class KafkaServer(
         metrics = Server.initializeMetrics(config, time, clusterId)
 
         /* register broker metrics */
+        // mark 用于保存 BrokerTopicMetrics
         _brokerTopicStats = new BrokerTopicStats
 
         quotaManagers = QuotaFactory.instantiate(config, metrics, time, threadNamePrefix.getOrElse(""))
         KafkaBroker.notifyClusterListeners(clusterId, kafkaMetricsReporters ++ metrics.reporters.asScala)
 
+        // mark 开始日志加载
+        // mark 用于处理文件加载失败处理类
         logDirFailureChannel = new LogDirFailureChannel(config.logDirs.size)
 
         /* start log manager */
         _logManager = LogManager(
-          config,
-          initialOfflineDirs,
-          configRepository,
-          kafkaScheduler,
-          time,
-          brokerTopicStats,
-          logDirFailureChannel,
-          config.usesTopicId)
+          config, // 配置
+          initialOfflineDirs, // 离线目录集合
+          configRepository, // kafka配置管理器
+          kafkaScheduler, // 调度器
+          time, // 时间工具类
+          brokerTopicStats, // topic状态管理器
+          logDirFailureChannel, // 日志目录失败处理器
+          config.usesTopicId) // topic状态管理器
         _brokerState = BrokerState.RECOVERY
-        // mark 启动管理器
+        // mark 启动管理器 (zkClient.getAllTopicsInCluster方法会获取所有的topic名称）
         logManager.startup(zkClient.getAllTopicsInCluster())
 
         if (config.migrationEnabled) {

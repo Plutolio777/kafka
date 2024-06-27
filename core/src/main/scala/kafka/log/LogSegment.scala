@@ -37,21 +37,19 @@ import scala.jdk.CollectionConverters._
 import scala.math._
 
 /**
- * A segment of the log. Each segment has two components: a log and an index. The log is a FileRecords containing
- * the actual messages. The index is an OffsetIndex that maps from logical offsets to physical file positions. Each
- * segment has a base offset which is an offset <= the least offset of any message in this segment and > any offset in
- * any previous segment.
+ * 日志段。每个日志段有两个组件：日志和索引。日志是一个包含实际消息的 FileRecords。索引是一个 OffsetIndex，
+ * 用于从逻辑偏移量映射到物理文件位置。每个段都有一个基准偏移量，该偏移量小于或等于该段中任何消息的最小偏移量，并且大于任何先前段中的偏移量。
  *
- * A segment with a base offset of [base_offset] would be stored in two files, a [base_offset].index and a [base_offset].log file.
+ * 一个基准偏移量为 [base_offset] 的段将存储在两个文件中，一个是 [base_offset].index 文件，另一个是 [base_offset].log 文件。
  *
- * @param log The file records containing log entries
- * @param lazyOffsetIndex The offset index
- * @param lazyTimeIndex The timestamp index
- * @param txnIndex The transaction index
- * @param baseOffset A lower bound on the offsets in this segment
- * @param indexIntervalBytes The approximate number of bytes between entries in the index
- * @param rollJitterMs The maximum random jitter subtracted from the scheduled segment roll time
- * @param time The time instance
+ * @param log                包含日志条目的文件记录
+ * @param lazyOffsetIndex    偏移索引
+ * @param lazyTimeIndex      时间戳索引
+ * @param txnIndex           事务索引
+ * @param baseOffset         该段中偏移量的下限
+ * @param indexIntervalBytes 索引中条目之间的近似字节数
+ * @param rollJitterMs       从计划的段滚动时间中减去的最大随机抖动
+ * @param time               时间实例
  */
 @nonthreadsafe
 class LogSegment private[log] (val log: FileRecords,
@@ -79,19 +77,32 @@ class LogSegment private[log] (val log: FileRecords,
     timeIndex.resize(size)
   }
 
+  /**
+   * mark 对日志段进行完整性检查。
+   *
+   * @param timeIndexFileNewlyCreated 指示时间索引文件是否是新创建的标志。
+   *
+   *                                  如果偏移索引文件存在：
+   *                                  - 如果时间索引文件是新创建的，则将其大小调整为 0。
+   *                                  - 跳过时间索引和偏移索引的完整性检查，因为在 recoverLog() 方法中会恢复所有超过恢复点的段，这里的检查是多余的。
+   *                                  - 执行事务索引的完整性检查。
+   *
+   *                                  如果偏移索引文件不存在，抛出 NoSuchFileException 异常。
+   */
   def sanityCheck(timeIndexFileNewlyCreated: Boolean): Unit = {
     if (lazyOffsetIndex.file.exists) {
-      // Resize the time index file to 0 if it is newly created.
+      // 如果时间索引文件是新创建的，将其大小调整为 0
       if (timeIndexFileNewlyCreated)
         timeIndex.resize(0)
-      // Sanity checks for time index and offset index are skipped because
-      // we will recover the segments above the recovery point in recoverLog()
-      // in any case so sanity checking them here is redundant.
+      // mark 跳过时间索引和偏移索引的完整性检查，因为在 recoverLog() 方法中会恢复所有超过恢复点的段
       txnIndex.sanityCheck()
+    } else {
+      // 如果偏移索引文件不存在，抛出异常
+      throw new NoSuchFileException(s"Offset index file ${lazyOffsetIndex.file.getAbsolutePath} does not exist")
     }
-    else throw new NoSuchFileException(s"Offset index file ${lazyOffsetIndex.file.getAbsolutePath} does not exist")
   }
 
+  // mark 记录segment创建时间
   private var created = time.milliseconds
 
   /* the number of bytes since we last added an entry in the offset index */
@@ -335,6 +346,7 @@ class LogSegment private[log] (val log: FileRecords,
    */
   @nonthreadsafe
   def recover(producerStateManager: ProducerStateManager, leaderEpochCache: Option[LeaderEpochFileCache] = None): Int = {
+    // mark 重置所有的索引
     offsetIndex.reset()
     timeIndex.reset()
     txnIndex.reset()
@@ -343,17 +355,24 @@ class LogSegment private[log] (val log: FileRecords,
     maxTimestampAndOffsetSoFar = TimestampOffset.Unknown
     try {
       for (batch <- log.batches.asScala) {
+        // mark 校验batch合法性（调用的是RecordBatch的ensureValid方法）
         batch.ensureValid()
+        // mark record batch中的最后偏移量是否在 offsetindex的偏移量范围内
         ensureOffsetInRange(batch.lastOffset)
 
         // The max timestamp is exposed at the batch level, so no need to iterate the records
+        // mark maxTimestampAndOffsetSoFar 表示目前record batch中的最大时间戳和偏移量
         if (batch.maxTimestamp > maxTimestampSoFar) {
           maxTimestampAndOffsetSoFar = TimestampOffset(batch.maxTimestamp, batch.lastOffset)
         }
 
         // Build offset index
-        if (validBytes - lastIndexEntry > indexIntervalBytes) {
+        // mark 当前的循环是遍历.log中的所有record batch 但不是所有的record batch都需要记录在索引中
+        // mark 每隔indexIntervalBytes字节才会近路当前batch的偏移量
+        if (validBytes - lastIndexEntry > indexIntervalBytes) { // mark 达到写索引的条件
+          // mark 向offsetIndex中记录一条索引项
           offsetIndex.append(batch.lastOffset, validBytes)
+          // mark 时间戳索引添加（只有当当前batch的偏移量和时间戳都大于时间戳索引中的最后条目时才会添加）
           timeIndex.maybeAppend(maxTimestampSoFar, offsetOfMaxTimestampSoFar)
           lastIndexEntry = validBytes
         }
@@ -361,9 +380,11 @@ class LogSegment private[log] (val log: FileRecords,
 
         if (batch.magic >= RecordBatch.MAGIC_VALUE_V2) {
           leaderEpochCache.foreach { cache =>
+            // mark 如果batch中的leader epoch大于当前cache中的最大epoch，则更新cache
             if (batch.partitionLeaderEpoch >= 0 && cache.latestEpoch.forall(batch.partitionLeaderEpoch > _))
               cache.assign(batch.partitionLeaderEpoch, batch.baseOffset)
           }
+          // 还没看
           updateProducerState(producerStateManager, batch)
         }
       }
@@ -372,11 +393,13 @@ class LogSegment private[log] (val log: FileRecords,
         warn("Found invalid messages in log segment %s at byte offset %d: %s. %s"
           .format(log.file.getAbsolutePath, validBytes, e.getMessage, e.getCause))
     }
+    // mark truncated大于0说明存在截断
     val truncated = log.sizeInBytes - validBytes
     if (truncated > 0)
       debug(s"Truncated $truncated invalid bytes at the end of segment ${log.file.getAbsoluteFile} during recovery")
 
     log.truncateTo(validBytes)
+    // mark 调整索引大小为entry size整数倍
     offsetIndex.trimToValidSize()
     // A normally closed segment always appends the biggest timestamp ever seen into log segment, we do this as well.
     timeIndex.maybeAppend(maxTimestampSoFar, offsetOfMaxTimestampSoFar, skipFullCheck = true)
@@ -681,13 +704,21 @@ object LogSegment {
    */
   def open(dir: File, baseOffset: Long, config: LogConfig, time: Time, fileAlreadyExists: Boolean = false,
            initFileSize: Int = 0, preallocate: Boolean = false, fileSuffix: String = ""): LogSegment = {
+    // mark 配置对的最大索引大小（指定每个日志段索引文件的最大字节数。）
     val maxIndexSize = config.maxIndexSize
     new LogSegment(
+      // mark 生成FileRecords对象这个类是底层用于对消息文件(baseoffset.log文件)IO操作的类 使用内存映射机制进行文件IO的读写
       FileRecords.open(UnifiedLog.logFile(dir, baseOffset, fileSuffix), fileAlreadyExists, initFileSize, preallocate),
+      // mark 处理索引文件
       LazyIndex.forOffset(UnifiedLog.offsetIndexFile(dir, baseOffset, fileSuffix), baseOffset = baseOffset, maxIndexSize = maxIndexSize),
+      // mark 处理时间索引文件
       LazyIndex.forTime(UnifiedLog.timeIndexFile(dir, baseOffset, fileSuffix), baseOffset = baseOffset, maxIndexSize = maxIndexSize),
+
+      // mark 处理已中止事务索引文件
       new TransactionIndex(baseOffset, UnifiedLog.transactionIndexFile(dir, baseOffset, fileSuffix)),
+      // mark 基础偏移量
       baseOffset,
+      // mark 控制了日志段对象新增索引项的频率。默认情况下，日志段至少新写入 4KB 的消息数据才会新增一条索引项。
       indexIntervalBytes = config.indexInterval,
       rollJitterMs = config.randomSegmentJitter,
       time)

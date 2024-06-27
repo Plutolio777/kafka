@@ -97,38 +97,63 @@ public final class ByteBufferUnmapper {
         }
     }
 
+    /**
+     * mark 生成用于 Java 7 或 8 的内存解除映射的方法句柄。
+     * <p>
+     * 这个方法句柄大致相当于以下 Lambda 表达式：
+     * <p>
+     * (ByteBuffer buffer) -> {
+     * sun.misc.Cleaner cleaner = ((java.nio.DirectByteBuffer) byteBuffer).cleaner();
+     * if (nonNull(cleaner))
+     * cleaner.clean();
+     * else
+     * noop(cleaner); // 因为 MethodHandles#guardWithTest 总是需要 if 和 else 两个分支，所以需要 noop
+     * }
+     *
+     * @param lookup 用于查找方法句柄的 MethodHandles.Lookup 对象
+     * @return 用于解除内存映射的 MethodHandle
+     * @throws ReflectiveOperationException 如果反射操作失败
+     */
     private static MethodHandle unmapJava7Or8(MethodHandles.Lookup lookup) throws ReflectiveOperationException {
-        /* "Compile" a MethodHandle that is roughly equivalent to the following lambda:
-         *
-         * (ByteBuffer buffer) -> {
-         *   sun.misc.Cleaner cleaner = ((java.nio.DirectByteBuffer) byteBuffer).cleaner();
-         *   if (nonNull(cleaner))
-         *     cleaner.clean();
-         *   else
-         *     noop(cleaner); // the noop is needed because MethodHandles#guardWithTest always needs both if and else
-         * }
-         */
+        // 获取 DirectByteBuffer 类
         Class<?> directBufferClass = Class.forName("java.nio.DirectByteBuffer");
+        // 获取 cleaner 方法
         Method m = directBufferClass.getMethod("cleaner");
         m.setAccessible(true);
         MethodHandle directBufferCleanerMethod = lookup.unreflect(m);
+        // 获取 cleaner 方法的返回类型
         Class<?> cleanerClass = directBufferCleanerMethod.type().returnType();
+        // 获取 clean 方法
         MethodHandle cleanMethod = lookup.findVirtual(cleanerClass, "clean", methodType(void.class));
+        // 创建 nonNull 测试的 MethodHandle
         MethodHandle nonNullTest = lookup.findStatic(ByteBufferUnmapper.class, "nonNull",
                 methodType(boolean.class, Object.class)).asType(methodType(boolean.class, cleanerClass));
+        // 创建 noop 的 MethodHandle
         MethodHandle noop = dropArguments(constant(Void.class, null).asType(methodType(void.class)), 0, cleanerClass);
+        // 创建用于解除内存映射的 MethodHandle
         MethodHandle unmapper = filterReturnValue(directBufferCleanerMethod, guardWithTest(nonNullTest, cleanMethod, noop))
                 .asType(methodType(void.class, ByteBuffer.class));
         return unmapper;
     }
 
+    /**
+     * 生成用于 Java 9 及以上版本的内存解除映射的方法句柄。
+     *
+     * @param lookup 用于查找方法句柄的 MethodHandles.Lookup 对象
+     * @return 用于解除内存映射的 MethodHandle
+     * @throws ReflectiveOperationException 如果反射操作失败
+     */
     private static MethodHandle unmapJava9(MethodHandles.Lookup lookup) throws ReflectiveOperationException {
+        // 获取 Unsafe 类
         Class<?> unsafeClass = Class.forName("sun.misc.Unsafe");
+        // 获取 invokeCleaner 方法
         MethodHandle unmapper = lookup.findVirtual(unsafeClass, "invokeCleaner",
                 methodType(void.class, ByteBuffer.class));
+        // 获取 theUnsafe 字段
         Field f = unsafeClass.getDeclaredField("theUnsafe");
         f.setAccessible(true);
         Object theUnsafe = f.get(null);
+        // 将 invokeCleaner 方法绑定到 theUnsafe 对象上
         return unmapper.bindTo(theUnsafe);
     }
 

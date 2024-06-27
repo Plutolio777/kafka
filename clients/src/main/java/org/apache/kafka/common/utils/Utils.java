@@ -939,19 +939,22 @@ public final class Utils {
     }
 
     /**
-     * Attempts to move source to target atomically and falls back to a non-atomic move if it fails.
-     * This function allows callers to decide whether to flush the parent directory. This is needed
-     * when a sequence of atomicMoveWithFallback is called for the same directory and we don't want
-     * to repeatedly flush the same parent directory.
+     * 尝试以原子方式将源路径移动到目标路径，如果失败则回退到非原子移动。
+     * 此函数允许调用者决定是否刷新父目录。当对同一目录调用一系列 atomicMoveWithFallback 时，
+     * 我们不希望重复刷新同一个父目录，因此需要这个参数。
      *
-     * @throws IOException if both atomic and non-atomic moves fail,
-     * or parent dir flush fails if needFlushParentDir is true.
+     * @param source 源路径
+     * @param target 目标路径
+     * @param needFlushParentDir 是否需要刷新父目录
+     * @throws IOException 如果原子和非原子移动都失败，或者如果 needFlushParentDir 为 true 时刷新父目录失败
      */
     public static void atomicMoveWithFallback(Path source, Path target, boolean needFlushParentDir) throws IOException {
         try {
+            // mark 先尝试原子类移动
             Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
         } catch (IOException outer) {
             try {
+                // mark 直接覆盖
                 Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
                 log.debug("Non-atomic move of {} to {} succeeded after atomic move failed due to {}", source, target,
                         outer.getMessage());
@@ -961,6 +964,7 @@ public final class Utils {
             }
         } finally {
             if (needFlushParentDir) {
+                // mark 刷新文件通道
                 flushDir(target.toAbsolutePath().normalize().getParent());
             }
         }

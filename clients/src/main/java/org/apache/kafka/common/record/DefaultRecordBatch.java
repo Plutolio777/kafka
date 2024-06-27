@@ -167,6 +167,11 @@ public class DefaultRecordBatch extends AbstractRecordBatch implements MutableRe
         return buffer.getLong(BASE_TIMESTAMP_OFFSET);
     }
 
+    /**
+     * mark 从RecordBatch中读取maxTimestamp字段的值（record batch中最后一个record的时间戳）
+     *
+     * @return 最后一个record的完整时间戳
+     */
     @Override
     public long maxTimestamp() {
         return buffer.getLong(MAX_TIMESTAMP_OFFSET);
@@ -202,6 +207,11 @@ public class DefaultRecordBatch extends AbstractRecordBatch implements MutableRe
         return buffer.getInt(BASE_SEQUENCE_OFFSET);
     }
 
+    /**
+     * mark 从RecordBatch中读取lastOffsetDelta字段的值（record batch总最后一个record的与record batch的相对偏移量）
+     *
+     * @return 最后一个record的完整偏移量
+     */
     private int lastOffsetDelta() {
         return buffer.getInt(LAST_OFFSET_DELTA_OFFSET);
     }

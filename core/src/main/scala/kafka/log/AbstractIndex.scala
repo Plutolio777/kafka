@@ -45,6 +45,7 @@ abstract class AbstractIndex(@volatile private var _file: File, val baseOffset: 
   protected def entrySize: Int
 
   /*
+   mark kafka关于冷热数据处理的底层原理（尽可能的让查找命中页缓存）
    Kafka mmaps index files into memory, and all the read / write operations of the index is through OS page cache. This
    avoids blocked disk I/O in most cases.
 
@@ -107,17 +108,23 @@ abstract class AbstractIndex(@volatile private var _file: File, val baseOffset: 
 
   @volatile
   protected var mmap: MappedByteBuffer = {
+    // mark 这个file都是手动new的File对象实际上并不确定会存在 所以这里实际上是尝试创建一个新的文件对象
     val newlyCreated = file.createNewFile()
+    // mark 创建随机读写文件流
     val raf = if (writable) new RandomAccessFile(file, "rw") else new RandomAccessFile(file, "r")
+
     try {
       /* pre-allocate the file if necessary */
+      // mark 如果是新建的文件 那么就设置文件大小
       if(newlyCreated) {
         if(maxIndexSize < entrySize)
           throw new IllegalArgumentException("Invalid max index size: " + maxIndexSize)
+        // mark   roundDownToExactMultiple 向下取整
         raf.setLength(roundDownToExactMultiple(maxIndexSize, entrySize))
       }
 
       /* memory-map the file */
+      // mark 创建内存映射
       _length = raf.length()
       val idx = {
         if (writable)
@@ -126,6 +133,7 @@ abstract class AbstractIndex(@volatile private var _file: File, val baseOffset: 
           raf.getChannel.map(FileChannel.MapMode.READ_ONLY, 0, _length)
       }
       /* set the position in the index for the next entry */
+      // mark 设置游标 如果是新文件则指向文件头否则指向尾部
       if(newlyCreated)
         idx.position(0)
       else
@@ -133,22 +141,23 @@ abstract class AbstractIndex(@volatile private var _file: File, val baseOffset: 
         idx.position(roundDownToExactMultiple(idx.limit(), entrySize))
       idx
     } finally {
+      // mark raf只是用来创建mmap的中间对象 创建好之后徐亚关闭
       CoreUtils.swallow(raf.close(), AbstractIndex)
     }
   }
 
   /**
-   * The maximum number of entries this index can hold
+   * 索引文件最大能够容纳的条目数 mmap的size除8个字节
    */
   @volatile
   private[this] var _maxEntries: Int = mmap.limit() / entrySize
 
-  /** The number of entries in this index */
+  /** 计算索引文件中条目的数量 文件的最后一位除以8个字节 */
   @volatile
   protected var _entries: Int = mmap.position() / entrySize
 
   /**
-   * True iff there are no more slots available in this index
+   * 判断当前条目数是否大于最大条目数
    */
   def isFull: Boolean = _entries >= _maxEntries
 
@@ -163,18 +172,20 @@ abstract class AbstractIndex(@volatile private var _file: File, val baseOffset: 
   def updateParentDir(parentDir: File): Unit = _file = new File(parentDir, file.getName)
 
   /**
-   * Reset the size of the memory map and the underneath file. This is used in two kinds of cases: (1) in
-   * trimToValidSize() which is called at closing the segment or new segment being rolled; (2) at
-   * loading segments from disk or truncating back to an old segment where a new log segment became active;
-   * we want to reset the index size to maximum index size to avoid rolling new segment.
+   * mark 重置内存映射和底层文件的大小。在以下两种情况下使用：
    *
-   * @param newSize new size of the index file
-   * @return a boolean indicating whether the size of the memory map and the underneath file is changed or not.
+   * 1. 在关闭段或新段滚动时调用的 trimToValidSize() 中使用。
+   * 2. 从磁盘加载段或截断回旧段以使新日志段变为活动时使用；我们希望将索引大小重置为最大索引大小，以避免滚动新段。
+   *
+   * @param newSize 新的索引文件大小。
+   * @return 布尔值，指示内存映射和底层文件的大小是否发生了变化。
    */
   def resize(newSize: Int): Boolean = {
     inLock(lock) {
+      // mark 将新大小调整为条目大小(entry size index为8字节 time为12字节)的整数倍
       val roundedNewSize = roundDownToExactMultiple(newSize, entrySize)
 
+      // mark 前后大小相同则返回false
       if (_length == roundedNewSize) {
         debug(s"Index ${file.getAbsolutePath} was not resized because it already has size $roundedNewSize")
         false
@@ -183,7 +194,7 @@ abstract class AbstractIndex(@volatile private var _file: File, val baseOffset: 
         try {
           val position = mmap.position()
 
-          /* Windows or z/OS won't let us modify the file length while the file is mmapped :-( */
+          /* mark Windows 或 z/OS 不允许我们在文件被内存映射时修改文件长度 :-(  所以必须得先关闭内存映射 */
           if (OperatingSystem.IS_WINDOWS || OperatingSystem.IS_ZOS)
             safeForceUnmap()
           raf.setLength(roundedNewSize)
@@ -368,6 +379,7 @@ abstract class AbstractIndex(@volatile private var _file: File, val baseOffset: 
     indexSlotRangeFor(idx, target, searchEntity)._2
 
   /**
+   * mark 索引寻址核心逻辑
    * Lookup lower and upper bounds for the given target.
    */
   private def indexSlotRangeFor(idx: ByteBuffer, target: Long, searchEntity: IndexSearchType): (Int, Int) = {

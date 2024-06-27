@@ -1830,20 +1830,21 @@ object UnifiedLog extends Logging {
    * @param numRemainingSegments                剩余日志段数量的并发映射。
    * @return 创建的 UnifiedLog 实例。
    */
-  def apply(dir: File,
-            config: LogConfig,
-            logStartOffset: Long,
-            recoveryPoint: Long,
-            scheduler: Scheduler,
-            brokerTopicStats: BrokerTopicStats,
-            time: Time,
-            maxTransactionTimeoutMs: Int,
-            producerStateManagerConfig: ProducerStateManagerConfig,
-            producerIdExpirationCheckIntervalMs: Int,
-            logDirFailureChannel: LogDirFailureChannel,
-            lastShutdownClean: Boolean = true,
-            topicId: Option[Uuid],
-            keepPartitionMetadataFile: Boolean,
+  def apply(dir: File, // topic分区目录File对象
+            config: LogConfig, // topic级别的针对日志的相关配置
+            logStartOffset: Long, // 日志起始偏移量
+            recoveryPoint: Long, // 恢复点偏移量
+            scheduler: Scheduler, // 调度器
+            brokerTopicStats: BrokerTopicStats, // topic状态管理器
+            time: Time, // 时间工具类
+            maxTransactionTimeoutMs: Int, // 最大事务超时时间
+            producerStateManagerConfig: ProducerStateManagerConfig, // 生产者状态管理器配置
+            producerIdExpirationCheckIntervalMs: Int, // 生产者ID过期检查间隔
+            logDirFailureChannel: LogDirFailureChannel, // 日志目录故障通道
+            lastShutdownClean: Boolean = true, // 最后一次关闭是否干净
+            topicId: Option[Uuid], // 主题ID
+            keepPartitionMetadataFile: Boolean, // 是否保留分区元数据文件
+            // 剩余日志段数量
             numRemainingSegments: ConcurrentMap[String, Int] = new ConcurrentHashMap[String, Int]): UnifiedLog = {
 
     // mark 如果日志目录不存在，则创建它
@@ -1853,6 +1854,7 @@ object UnifiedLog extends Logging {
     val topicPartition = UnifiedLog.parseTopicPartitionName(dir)
 
     // mark 创建一个新的日志段实例 LogSegments提供了底层日志端的读写能力
+    // mark 里面维护了一个跳表（ConcurrentSkipListMap）来用于检索所有的日志段 这里是一个未加载的状态
     val segments = new LogSegments(topicPartition)
 
     // 可能创建领导纪元缓存
@@ -1869,19 +1871,19 @@ object UnifiedLog extends Logging {
 
     // mark 加载日志并获取偏移量
     val offsets = new LogLoader(
-      dir,
-      topicPartition,
-      config,
-      scheduler,
-      time,
-      logDirFailureChannel,
-      lastShutdownClean,
-      segments,
-      logStartOffset,
-      recoveryPoint,
-      leaderEpochCache,
-      producerStateManager,
-      numRemainingSegments
+      dir, // 分区目录File对象
+      topicPartition, // topic partition 对象
+      config, // 日志相关的配置
+      scheduler, // 调度器
+      time, // 时间工具类
+      logDirFailureChannel, // 日志目录故障通道
+      lastShutdownClean, // 最后一次关闭是否干净
+      segments, // 日志段集合
+      logStartOffset, // 日志起始偏移量
+      recoveryPoint, // 恢复点偏移量
+      leaderEpochCache, // leader epoch 缓存
+      producerStateManager, // 生产者状态管理器
+      numRemainingSegments // 剩余日志段数量
     ).load()
 
     // 创建本地日志实例
@@ -1899,6 +1901,17 @@ object UnifiedLog extends Logging {
       keepPartitionMetadataFile)
   }
 
+  /**
+   * mark 获取日志文件对象。
+   *
+   * 该方法根据指定的目录、偏移量和可选的后缀生成并返回一个日志文件。
+   * 它调用 `LocalLog.logFile` 方法来生成日志文件。
+   *
+   * @param dir    要生成日志文件的目录。
+   * @param offset 用于生成日志文件的偏移量。
+   * @param suffix 可选的文件后缀，默认为空字符串。
+   * @return 生成的日志文件。
+   */
   def logFile(dir: File, offset: Long, suffix: String = ""): File = LocalLog.logFile(dir, offset, suffix)
 
   def logDeleteDirName(topicPartition: TopicPartition): String = LocalLog.logDeleteDirName(topicPartition)
@@ -1907,8 +1920,30 @@ object UnifiedLog extends Logging {
 
   def logDirName(topicPartition: TopicPartition): String = LocalLog.logDirName(topicPartition)
 
+  /**
+   * mark 获取偏移量索引文件对象。
+   *
+   * 该方法根据指定的目录、偏移量和可选的后缀生成并返回一个偏移量索引文件。
+   * 它调用 `LocalLog.offsetIndexFile` 方法来生成偏移量索引文件。
+   *
+   * @param dir    要生成偏移量索引文件的目录。
+   * @param offset 用于生成偏移量索引文件的偏移量。
+   * @param suffix 可选的文件后缀，默认为空字符串。
+   * @return 生成的偏移量索引文件。
+   */
   def offsetIndexFile(dir: File, offset: Long, suffix: String = ""): File = LocalLog.offsetIndexFile(dir, offset, suffix)
 
+  /**
+   * mark 获取时间索引文件对象。
+   *
+   * 该方法根据指定的目录、偏移量和可选的后缀生成并返回一个时间索引文件。
+   * 它调用 `LocalLog.timeIndexFile` 方法来生成时间索引文件。
+   *
+   * @param dir    要生成时间索引文件的目录。
+   * @param offset 用于生成时间索引文件的偏移量。
+   * @param suffix 可选的文件后缀，默认为空字符串。
+   * @return 生成的时间索引文件。
+   */
   def timeIndexFile(dir: File, offset: Long, suffix: String = ""): File = LocalLog.timeIndexFile(dir, offset, suffix)
 
   def deleteFileIfExists(file: File, suffix: String = ""): Unit =
@@ -1981,13 +2016,21 @@ object UnifiedLog extends Logging {
                                   logDirFailureChannel: LogDirFailureChannel,
                                   recordVersion: RecordVersion,
                                   logPrefix: String): Option[LeaderEpochFileCache] = {
+    /**
+     * 0            # 文件版本号
+     * epoch offset # 每一行表示一个领导者任期(epoch)和其对应的起始偏移量(offset)
+     */
+    // mark 分区文件夹中创建 leader-epoch-checkpoint 文件
     val leaderEpochFile = LeaderEpochCheckpointFile.newFile(dir)
 
     def newLeaderEpochFileCache(): LeaderEpochFileCache = {
+      // mark leader-epoch-checkpoint 文件底层操作对象
       val checkpointFile = new LeaderEpochCheckpointFile(leaderEpochFile, logDirFailureChannel)
+      // mark 生成缓存
       new LeaderEpochFileCache(topicPartition, checkpointFile)
     }
 
+    // mark record version < V2
     if (recordVersion.precedes(RecordVersion.V2)) {
       val currentCache = if (leaderEpochFile.exists())
         Some(newLeaderEpochFileCache())
@@ -1999,6 +2042,7 @@ object UnifiedLog extends Logging {
 
       Files.deleteIfExists(leaderEpochFile.toPath)
       None
+      // mark 返回 newLeaderEpochFileCache
     } else {
       Some(newLeaderEpochFileCache())
     }
@@ -2062,7 +2106,9 @@ object UnifiedLog extends Logging {
                                         logPrefix: String): Unit = {
     val offsetsToSnapshot =
       if (segments.nonEmpty) {
+        // mark 获取最后一个segment的基础偏移量
         val lastSegmentBaseOffset = segments.lastSegment.get.baseOffset
+        // mark 获取倒数第二个segment的基础偏移量
         val nextLatestSegmentBaseOffset = segments.lowerSegment(lastSegmentBaseOffset).map(_.baseOffset)
         Seq(nextLatestSegmentBaseOffset, Some(lastSegmentBaseOffset), Some(lastOffset))
       } else {

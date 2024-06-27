@@ -69,25 +69,32 @@ public class FileLogInputStream implements LogInputStream<FileLogInputStream.Fil
         Utils.readFullyOrFail(channel, logHeaderBuffer, position, "log header");
 
         logHeaderBuffer.rewind();
+        // mark 获取record batch的first offset 0-8字节
         long offset = logHeaderBuffer.getLong(OFFSET_OFFSET);
+        // mark 获取record batch的messageSize  8-12字节
         int size = logHeaderBuffer.getInt(SIZE_OFFSET);
 
         // V0 has the smallest overhead, stricter checking is done later
+        // mark 开始校验消息的大小是否对 因为V0消息校验开销最小 如果都小于V0则肯定不满足条件
+        // mark V0最小消息的长度是 crc32(4b) + magic(1b) + attributes(1b) + timestamp(8b) + keySize(4b) + valueSize(4b)
         if (size < LegacyRecord.RECORD_OVERHEAD_V0)
             throw new CorruptRecordException(String.format("Found record size %d smaller than minimum record " +
                             "overhead (%d) in file %s.", size, LegacyRecord.RECORD_OVERHEAD_V0, fileRecords.file()));
 
         if (position > end - LOG_OVERHEAD - size)
             return null;
-
+        // mark 获取record batch中的magic 16-17字节
         byte magic = logHeaderBuffer.get(MAGIC_OFFSET);
         final FileChannelRecordBatch batch;
 
+        // mark V2之前的 message record
         if (magic < RecordBatch.MAGIC_VALUE_V2)
             batch = new LegacyFileChannelRecordBatch(offset, magic, fileRecords, position, size);
+            // mark V2版本 message record
         else
             batch = new DefaultFileChannelRecordBatch(offset, magic, fileRecords, position, size);
 
+        // mark 指针指向下一个record batch
         position += batch.sizeInBytes();
         return batch;
     }
@@ -191,8 +198,10 @@ public class FileLogInputStream implements LogInputStream<FileLogInputStream.Fil
         protected abstract int headerSize();
 
         protected RecordBatch loadFullBatch() {
+            // mark 如果fullBatch不为空 则直接返回fullBatch
             if (fullBatch == null) {
                 batchHeader = null;
+                // mark 加载完整的record batch
                 fullBatch = loadBatchWithSize(sizeInBytes(), "full record batch");
             }
             return fullBatch;
@@ -211,6 +220,7 @@ public class FileLogInputStream implements LogInputStream<FileLogInputStream.Fil
         private RecordBatch loadBatchWithSize(int size, String description) {
             FileChannel channel = fileRecords.channel();
             try {
+                // mark 分配内存空间
                 ByteBuffer buffer = ByteBuffer.allocate(size);
                 Utils.readFullyOrFail(channel, buffer, position, description);
                 buffer.rewind();

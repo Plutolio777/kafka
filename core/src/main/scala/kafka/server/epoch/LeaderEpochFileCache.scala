@@ -42,6 +42,7 @@ class LeaderEpochFileCache(topicPartition: TopicPartition,
   this.logIdent = s"[LeaderEpochCache $topicPartition] "
 
   private val lock = new ReentrantReadWriteLock()
+  // mark 用于保存 epoch -> startOffset映射
   private val epochs = new util.TreeMap[Int, EpochEntry]()
 
   inWriteLock(lock) {

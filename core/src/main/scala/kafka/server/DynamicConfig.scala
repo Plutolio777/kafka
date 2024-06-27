@@ -112,16 +112,37 @@ object DynamicConfig {
     }
   }
 
+  /**
+   * mark 验证配置属性是否符合指定的配置定义。
+   *
+   * 这个方法检查给定的配置属性是否符合 `ConfigDef` 定义，并根据是否允许自定义属性来处理未知的配置键。
+   * 该方法还解析变量配置并验证最终的配置值。
+   *
+   * @param configDef          定义有效配置键及其约束的 `ConfigDef` 对象。
+   * @param props              包含待验证配置的 `Properties` 对象。
+   * @param customPropsAllowed 一个布尔值，指示是否允许自定义属性。如果为 `false`，则不允许配置中包含未定义的键。
+   * @throws IllegalArgumentException 如果不允许自定义属性且发现未知的配置键时抛出此异常。
+   */
   private def validate(configDef: ConfigDef, props: Properties, customPropsAllowed: Boolean) = {
-    // Validate Names
+    // mark 获取有效配置名称
     val names = configDef.names()
+
+    // mark 获取传入的配置属性中的键名集合，并将它们转换为 Scala 集合
     val propKeys = props.keySet.asScala.map(_.asInstanceOf[String])
+
+    // mark 如果不允许自定义属性，检查是否有未知的配置键
     if (!customPropsAllowed) {
+      // mark 过滤出所有未定义的键
       val unknownKeys = propKeys.filterNot(names.contains(_))
+
+      // mark 如果存在未知的键，抛出异常
       require(unknownKeys.isEmpty, s"Unknown Dynamic Configuration: $unknownKeys.")
     }
+
+    // 解析传入配置中的变量配置
     val propResolved = DynamicBrokerConfig.resolveVariableConfigs(props)
-    // ValidateValues
+
+    // 使用配置定义解析并验证最终的配置值
     configDef.parse(propResolved)
   }
 }

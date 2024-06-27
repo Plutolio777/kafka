@@ -57,7 +57,7 @@ object ZooKeeperClient {
 class ZooKeeperClient(connectString: String,
                       sessionTimeoutMs: Int,
                       connectionTimeoutMs: Int,
-                      maxInFlightRequests: Int,
+                      maxInFlightRequests: Int, // zookeeper最大请求数量
                       time: Time,
                       metricGroup: String,
                       metricType: String,
@@ -72,6 +72,8 @@ class ZooKeeperClient(connectString: String,
   private val isConnectedOrExpiredCondition = isConnectedOrExpiredLock.newCondition()
   private val zNodeChangeHandlers = new ConcurrentHashMap[String, ZNodeChangeHandler]().asScala
   private val zNodeChildChangeHandlers = new ConcurrentHashMap[String, ZNodeChildChangeHandler]().asScala
+
+  // mark Semaphore 用于控制请求最大数据量
   private val inFlightRequests = new Semaphore(maxInFlightRequests)
   private val stateChangeHandlers = new ConcurrentHashMap[String, StateChangeHandler]().asScala
   private[zookeeper] val reinitializeScheduler = new KafkaScheduler(threads = 1, s"zk-client-${threadPrefix}reinit-")
@@ -121,11 +123,13 @@ class ZooKeeperClient(connectString: String,
   }
 
   /**
+   * mark 获取zookeeper的连接状态
    * Return the state of the ZooKeeper connection.
    */
   def connectionState: States = zooKeeper.getState
 
   /**
+   * mark 处理单个请求
    * Send a request and wait for its response. See handle(Seq[AsyncRequest]) for details.
    *
    * @param request a single request to send and wait on.
@@ -136,6 +140,8 @@ class ZooKeeperClient(connectString: String,
   }
 
   /**
+   * mark 处理批量请求.
+   *
    * Send a pipelined sequence of requests and wait for all of their responses.
    *
    * The watch flag on each outgoing request will be set if we've already registered a handler for the
@@ -150,17 +156,21 @@ class ZooKeeperClient(connectString: String,
     if (requests.isEmpty)
       Seq.empty
     else {
+      // mark 准备栅栏和响应队列
       val countDownLatch = new CountDownLatch(requests.size)
       val responseQueue = new ArrayBlockingQueue[Req#Response](requests.size)
 
       requests.foreach { request =>
+        // mark 最大请求数加1
         inFlightRequests.acquire()
         try {
+          // mark 异步发送请求
           inReadLock(initializationLock) {
             send(request) { response =>
-              responseQueue.add(response)
-              inFlightRequests.release()
-              countDownLatch.countDown()
+              // mark send方法中异步请求zookeeper完成后处理response的回调
+              responseQueue.add(response) // mark 加入队列
+              inFlightRequests.release() // mark 释放请求数
+              countDownLatch.countDown() // mark 栅栏减1
             }
           }
         } catch {
@@ -174,9 +184,20 @@ class ZooKeeperClient(connectString: String,
     }
   }
 
-  // Visibility to override for testing
+  /**
+   * 发送一个异步请求到ZooKeeper，并处理响应。
+   *
+   * 这个方法接受一个类型为 `AsyncRequest` 的请求和一个回调函数 `processResponse`，用于处理响应。
+   * 它会匹配请求的类型，发送相应的ZooKeeper请求，并附加适当的回调来处理响应。
+   * 然后将响应传递给提供的 `processResponse` 函数进行进一步处理。
+   *
+   * @param request         异步请求，必须是 `AsyncRequest` 的子类型。
+   * @param processResponse 处理响应的函数，类型为 `Req#Response`。
+   *                        当从ZooKeeper接收到响应时，这个函数会被调用来处理响应。
+   */
   private[zookeeper] def send[Req <: AsyncRequest](request: Req)(processResponse: Req#Response => Unit): Unit = {
     // Safe to cast as we always create a response of the right type
+    // mark zookeeper异步发送用于处理response的回调
     def callback(response: AsyncResponse): Unit = processResponse(response.asInstanceOf[Req#Response])
 
     def responseMetadata(sendTimeMs: Long) = new ResponseMetadata(sendTimeMs, receivedTimeMs = time.hiResClockMs())
@@ -240,7 +261,10 @@ class ZooKeeperClient(connectString: String,
   }
 
   /**
+   * mark 无期限的等待zookeeper连接成功
+   *
    * Wait indefinitely until the underlying zookeeper client to reaches the CONNECTED state.
+   *
    * @throws ZooKeeperClientAuthFailedException if the authentication failed either before or while waiting for connection.
    * @throws ZooKeeperClientExpiredException if the session expired either before or while waiting for connection.
    */
@@ -248,13 +272,25 @@ class ZooKeeperClient(connectString: String,
     waitUntilConnected(Long.MaxValue, TimeUnit.MILLISECONDS)
   }
 
+  /**
+   * 等待与ZooKeeper的连接建立，直到超时或成功连接。
+   *
+   * 这个方法会阻塞当前线程，直到与ZooKeeper的连接建立，或者发生连接超时或认证失败。
+   *
+   * @param timeout  等待连接的超时时间。
+   * @param timeUnit 超时时间的单位。
+   * @throws ZooKeeperClientTimeoutException    当等待连接的时间超过指定的超时时间时抛出。
+   * @throws ZooKeeperClientAuthFailedException 当认证失败时抛出。
+   * @throws ZooKeeperClientExpiredException    当会话过期时抛出。
+   */
   private def waitUntilConnected(timeout: Long, timeUnit: TimeUnit): Unit = {
     info("Waiting until connected.")
-    var nanos = timeUnit.toNanos(timeout)
+    var nanos = timeUnit.toNanos(timeout) // 期望等待时间
     inLock(isConnectedOrExpiredLock) {
       // mark connectionState实际上是会调用zookeeper.getState()方法获取zookeeper的连接
       var state = connectionState
       while (!state.isConnected && state.isAlive) {
+        // mark 时间到抛出连接超时异常
         if (nanos <= 0) {
           throw new ZooKeeperClientTimeoutException(s"Timed out waiting for connection while in state: $state")
         }

@@ -167,6 +167,7 @@ object DynamicBrokerConfig {
   private def validateConfigTypes(props: Properties): Unit = {
     val baseProps = new Properties
     props.asScala.foreach {
+      // mark 如果键匹配 `ListenerConfigRegex` 正则表达式，则提取基本名称并放入 baseProps。
       case (ListenerConfigRegex(baseName), v) => baseProps.put(baseName, v)
       case (k, v) => baseProps.put(k, v)
     }
@@ -190,14 +191,32 @@ object DynamicBrokerConfig {
     }.toMap.asJava
   }
 
+  /**
+   * 解析并过滤原始配置属性，去除以特定前缀开头的配置项。
+   *
+   * 这个方法接受一个包含原始配置的 `Properties` 对象，并返回一个新的 `Properties` 对象。
+   * 返回的属性集合中不包含以 `AbstractConfig.CONFIG_PROVIDERS_CONFIG` 前缀开头的配置项。
+   *
+   * @param propsOriginal 包含原始配置的 `Properties` 对象。
+   * @return 一个新的 `Properties` 对象，其中不包含以 `AbstractConfig.CONFIG_PROVIDERS_CONFIG` 前缀开头的配置项。
+   */
   private[server] def resolveVariableConfigs(propsOriginal: Properties): Properties = {
+    // 创建一个新的 Properties 对象，用于存储过滤后的配置。
     val props = new Properties
+
+    // 创建一个 AbstractConfig 对象来处理原始配置。
     val config = new AbstractConfig(new ConfigDef(), propsOriginal, false)
+
+    // 遍历原始配置项，过滤掉以特定前缀开头的配置项。
     config.originals.forEach { (key, value) =>
+      // 检查键是否不以 AbstractConfig.CONFIG_PROVIDERS_CONFIG 开头。
       if (!key.startsWith(AbstractConfig.CONFIG_PROVIDERS_CONFIG)) {
+        // 如果键不以特定前缀开头，则将键值对加入新的 Properties 对象。
         props.put(key, value)
       }
     }
+
+    // 返回过滤后的配置项集合。
     props
   }
 }
@@ -233,8 +252,10 @@ class DynamicBrokerConfig(private val kafkaConfig: KafkaConfig) extends Logging 
     zkClientOpt.foreach { zkClient =>
       // 创建 AdminZkClient 实例
       val adminZkClient = new AdminZkClient(zkClient)
+      // mark  cluster-wide 类型的参数更新
       // mark 从kafka拉取配置并更新 路径为 /config/brokers/<default> 拉取配置（如果不存在节点则返回空Properties）
       updateDefaultConfig(adminZkClient.fetchEntityConfig(ConfigType.Broker, ConfigEntityName.Default), false)
+      // mark per-broker 类型的参数更新
       // mark 从kafka拉取配置并更新 路径为 /config/brokers/<brokerid> 拉取配置（如果不存在节点则返回空Properties）
       val props = adminZkClient.fetchEntityConfig(ConfigType.Broker, kafkaConfig.brokerId.toString)
       val brokerConfig = maybeReEncodePasswords(props, adminZkClient)

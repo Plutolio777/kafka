@@ -191,6 +191,7 @@ object BrokerMetadataCheckpoint extends Logging {
         // mark 尝试读取元数据，并根据情况将其添加到映射中或在忽略缺失时跳过
         brokerCheckpoint.read() match {
           case Some(properties) =>
+            // mark 保存映射关系
             brokerMetadataMap += logDir -> properties
           case None =>
             if (!ignoreMissing) {
@@ -206,7 +207,7 @@ object BrokerMetadataCheckpoint extends Logging {
       }
     }
 
-    // mark 根据是否找到元数据，返回不同的结果 RawMetaProperties是元数据的抽象 其中包括记录了meta.properties文件中的version，broker.id，cluster.id
+    // mark 如果<Dir，Meta Properties> 映射为空（可能所有目录都已经离线：IO异常）
     if (brokerMetadataMap.isEmpty) {
       (new RawMetaProperties(), offlineDirs)
     }
@@ -243,6 +244,7 @@ object BrokerMetadataCheckpoint extends Logging {
 }
 
 /**
+ * mark 日志元数据文件检查点操作类（/data-log-dir/meta.properties）
  * This class saves the metadata properties to a file
  */
 class BrokerMetadataCheckpoint(val file: File) extends Logging {

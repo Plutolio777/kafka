@@ -738,16 +738,19 @@ object LocalLog extends Logging {
     }
 
     val dirName = dir.getName
+    // mark topic文件夹格式为 topic-partition
     if (dirName == null || dirName.isEmpty || !dirName.contains('-'))
       throw exception(dir)
+    // mark 待删除分区和未来分区格式校验
     if (dirName.endsWith(DeleteDirSuffix) && !DeleteDirPattern.matcher(dirName).matches ||
       dirName.endsWith(FutureDirSuffix) && !FutureDirPattern.matcher(dirName).matches)
       throw exception(dir)
 
+    // mark 删除分区和未来分区只提取 topic-partition部分
     val name: String =
       if (dirName.endsWith(DeleteDirSuffix) || dirName.endsWith(FutureDirSuffix)) dirName.substring(0, dirName.lastIndexOf('.'))
       else dirName
-
+    // mark 获取topic和partition
     val index = name.lastIndexOf('-')
     val topic = name.substring(0, index)
     val partitionString = name.substring(index + 1)
@@ -757,7 +760,7 @@ object LocalLog extends Logging {
     val partition =
       try partitionString.toInt
       catch { case _: NumberFormatException => throw exception(dir) }
-
+    // mark 返回分区信息
     new TopicPartition(topic, partition)
   }
 
@@ -978,23 +981,22 @@ object LocalLog extends Logging {
   }
 
   /**
-   * Perform physical deletion of the index and log files for the given segment.
-   * Prior to the deletion, the index and log files are renamed by appending .deleted to the
-   * respective file name. Allows these files to be optionally deleted asynchronously.
+   * mark 执行给定段的索引和日志文件的物理删除。
+   * 在删除之前，索引和日志文件通过在相应文件名后附加 .deleted 进行重命名。
+   * 允许这些文件异步删除。
    *
-   * This method assumes that the file exists. It does not need to convert IOException
-   * (thrown from changeFileSuffixes) to KafkaStorageException because it is either called before
-   * all logs are loaded or the caller will catch and handle IOException.
+   * 此方法假定文件存在。它不需要将 IOException（由 changeFileSuffixes 抛出）转换为 KafkaStorageException，
+   * 因为它要么在加载所有日志之前调用，要么调用者会捕获并处理 IOException。
    *
-   * @param segmentsToDelete The segments to be deleted
-   * @param asyncDelete If true, the deletion of the segments is done asynchronously
-   * @param dir The directory in which the log will reside
-   * @param topicPartition The topic
-   * @param config The log configuration settings
-   * @param scheduler The thread pool scheduler used for background actions
-   * @param logDirFailureChannel The LogDirFailureChannel to asynchronously handle log dir failure
-   * @param logPrefix The logging prefix
-   * @throws IOException if the file can't be renamed and still exists
+   * @param segmentsToDelete     要删除的段
+   * @param asyncDelete          如果为 true，段的删除将异步进行
+   * @param dir                  日志所在的目录
+   * @param topicPartition       主题分区
+   * @param config               日志配置设置
+   * @param scheduler            用于后台操作的线程池调度程序
+   * @param logDirFailureChannel 用于异步处理日志目录故障的 LogDirFailureChannel
+   * @param logPrefix            日志前缀
+   * @throws IOException 如果文件无法重命名且仍然存在
    */
   private[log] def deleteSegmentFiles(segmentsToDelete: immutable.Iterable[LogSegment],
                                       asyncDelete: Boolean,
@@ -1010,21 +1012,20 @@ object LocalLog extends Logging {
     }
 
     def deleteSegments(): Unit = {
-      info(s"${logPrefix}Deleting segment files ${segmentsToDelete.mkString(",")}")
+      info(s"${logPrefix}正在删除段文件 ${segmentsToDelete.mkString(",")}")
       val parentDir = dir.getParent
-      maybeHandleIOException(logDirFailureChannel, parentDir, s"Error while deleting segments for $topicPartition in dir $parentDir") {
+      maybeHandleIOException(logDirFailureChannel, parentDir, s"删除 $topicPartition 在目录 $parentDir 的段时出错") {
         segmentsToDelete.foreach { segment =>
           segment.deleteIfExists()
         }
       }
     }
-
+    // mark 异步交给scheduler线程池处理
     if (asyncDelete)
       scheduler.schedule("delete-file", () => deleteSegments(), delay = config.fileDeleteDelayMs)
     else
       deleteSegments()
   }
-
   private[log] def emptyFetchDataInfo(fetchOffsetMetadata: LogOffsetMetadata,
                                       includeAbortedTxns: Boolean): FetchDataInfo = {
     val abortedTransactions =

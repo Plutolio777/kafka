@@ -295,6 +295,7 @@ object BrokerTopicStats {
 class BrokerTopicStats extends Logging {
   import BrokerTopicStats._
 
+  // mark 用于保存 string -> BrokerTopicMetrics的简单对象池
   private val stats = new Pool[String, BrokerTopicMetrics](Some(valueFactory))
   val allTopicsStats = new BrokerTopicMetrics(None)
 

@@ -438,6 +438,7 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
       case _ => throw getDataResponse.resultException.get
     }
   }
+
   def getEntitiesConfigs(rootEntityType: String, sanitizedEntityNames: Set[String]): Map[String, Properties] = {
     val getDataRequests: Seq[GetDataRequest] = sanitizedEntityNames.map { entityName =>
       GetDataRequest(ConfigEntityZNode.path(rootEntityType, entityName), Some(entityName))
@@ -1671,7 +1672,7 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
   }
 
   /**
-   * 获取集群 ID。
+   * mark 获取集群 ID。
    *
    * @return 可选的集群 ID 字符串。
    */
@@ -2116,16 +2117,18 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
     val responses = new mutable.ArrayBuffer[Req#Response]
     // 循环处理请求，直到剩余请求为空
     while (remainingRequests.nonEmpty) {
+      // mark 处理请求方法
       val batchResponses = zooKeeperClient.handleRequests(remainingRequests)
 
       // 更新延迟度量
       batchResponses.foreach(response => latencyMetric.update(response.metadata.responseTimeMs))
 
-      // 如果存在CONNECTIONLOSS结果码，执行慢路径
+      // mark 如果存在CONNECTIONLOSS（连接丢失）结果码，
       if (batchResponses.exists(_.resultCode == Code.CONNECTIONLOSS)) {
+        // mark 请求和响应进行配对
         val requestResponsePairs = remainingRequests.zip(batchResponses)
 
-        // 清空剩余请求列表，根据响应结果处理请求
+        // mark 将连接失败的请求拿出来后续再重新请求
         remainingRequests.clear()
         requestResponsePairs.foreach { case (request, response) =>
           if (response.resultCode == Code.CONNECTIONLOSS)
@@ -2134,7 +2137,7 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
             responses += response
         }
 
-        // 如果仍有未处理的请求，等待ZooKeeper重新连接
+        // mark 如果仍有未处理的请求，等待ZooKeeper重新连接（这个地方是无期限阻塞）
         if (remainingRequests.nonEmpty)
           zooKeeperClient.waitUntilConnected()
       } else {
@@ -2311,24 +2314,32 @@ object KafkaZkClient {
     if (zkClientConfig.getProperty(ZKConfig.JUTE_MAXBUFFER) == null)
       zkClientConfig.setProperty(ZKConfig.JUTE_MAXBUFFER, ((4096 * 1024).toString))
 
+    // mark 用于处理 localhost:2181/myapp这种形式 kafka依赖的所有节点都是以myapp为根路径（保证myapp这个路径一定存在）
     if (createChrootIfNecessary) {
       val chrootIndex = connectString.indexOf("/")
       if (chrootIndex > 0) {
+        // mark 先把连接地址提取出来 (localhost:2181)
         val zkConnWithoutChrootForChrootCreation = connectString.substring(0, chrootIndex)
+        // mark 创建临时客户端
         val zkClientForChrootCreation = apply(zkConnWithoutChrootForChrootCreation, isSecure, sessionTimeoutMs,
           connectionTimeoutMs, maxInFlightRequests, time, name, zkClientConfig, metricGroup, metricType)
         try {
+          // mark 提取临时客户端(/myapp)
           val chroot = connectString.substring(chrootIndex)
+          // mark 如果 myapp不存在则创建节点
           if (!zkClientForChrootCreation.pathExists(chroot)) {
             zkClientForChrootCreation.makeSurePersistentPathExists(chroot)
           }
         } finally {
+          // mark 关闭临时客户端
           zkClientForChrootCreation.close()
         }
       }
     }
+    // mark 创建zookeeper底层客户端（用于底层zookeeper交互的真实客户端封装）
     val zooKeeperClient = new ZooKeeperClient(connectString, sessionTimeoutMs, connectionTimeoutMs, maxInFlightRequests,
       time, metricGroup, metricType, zkClientConfig, name)
+    // mark KafkaZkClient 是业务封装 具体的业务流程在这个里面
     new KafkaZkClient(zooKeeperClient, isSecure, time)
   }
 
@@ -2425,7 +2436,7 @@ object KafkaZkClient {
     val secureAclsEnabled = config.zkEnableSecureAcls
     val isZkSecurityEnabled = JaasUtils.isZkSaslEnabled || KafkaConfig.zkTlsClientAuthEnabled(zkClientConfig)
 
-    // mark 如果启用了安全ACLs但未配置ZooKeeper安全机制，则抛出安全异常
+    // mark 如果启用了安全ACLs但未配置ZooKeeper安全机制，则抛出安全异常（acl和tls2二选一？）
 
     if (secureAclsEnabled && !isZkSecurityEnabled)
       throw new java.lang.SecurityException(

@@ -64,12 +64,12 @@ public class FileRecords extends AbstractRecords implements Closeable {
         this.channel = channel;
         this.start = start;
         this.end = end;
-        this.isSlice = isSlice;
+        this.isSlice = isSlice; // 是否为视图切片
         this.size = new AtomicInteger();
         // mark 判断是否为视图切片
         if (isSlice) {
             // don't check the file size if this is just a slice view
-            // mark 不检查文件大小是否超过阈值 直接设置size
+            // mark 如果是视图切片 不设置position直接设置size
             size.set(end - start);
         } else {
             // mark 检查文件大小是否超过阈值
@@ -85,7 +85,7 @@ public class FileRecords extends AbstractRecords implements Closeable {
             // mark 将文件指针设置到文件末尾
             channel.position(limit);
         }
-        // mark 用于生成处理日志段的迭代器
+        // mark 用于生成处理日志段的迭代器（返回一个迭代器工厂）
         batches = batchesFrom(start);
     }
 
@@ -255,27 +255,30 @@ public class FileRecords extends AbstractRecords implements Closeable {
     }
 
     /**
-     * Truncate this file message set to the given size in bytes. Note that this API does no checking that the
-     * given size falls on a valid message boundary.
-     * In some versions of the JDK truncating to the same size as the file message set will cause an
-     * update of the files mtime, so truncate is only performed if the targetSize is smaller than the
-     * size of the underlying FileChannel.
-     * It is expected that no other threads will do writes to the log when this function is called.
-     * @param targetSize The size to truncate to. Must be between 0 and sizeInBytes.
-     * @return The number of bytes truncated off
+     * mark 将log截断 只保留到targetSize
+     * 将此文件消息集截断到给定的字节大小。请注意，此 API 不会检查给定的大小是否落在有效的消息边界上。
+     * 在某些版本的 JDK 中，截断到与文件消息集相同的大小会导致文件的修改时间（mtime）更新，
+     * 因此仅在目标大小小于底层 FileChannel 大小时执行截断操作。
+     * 预期在调用此函数时不会有其他线程对日志进行写操作。
+     *
+     * @param targetSize 要截断到的大小。必须在 0 和 sizeInBytes 之间。
+     * @return 截断掉的字节数
+     * @throws IOException 如果发生 I/O 错误
+     * @throws KafkaException 如果目标大小无效或超出范围
      */
     public int truncateTo(int targetSize) throws IOException {
         int originalSize = sizeInBytes();
+        // mark 如果大于原始大小则截断失败
         if (targetSize > originalSize || targetSize < 0)
-            throw new KafkaException("Attempt to truncate log segment " + file + " to " + targetSize + " bytes failed, " +
-                    " size of this log segment is " + originalSize + " bytes.");
+            throw new KafkaException("尝试将日志段 " + file + " 截断到 " + targetSize + " 字节失败，" +
+                    "此日志段的大小为 " + originalSize + " 字节。");
+        // mark 调用FileChannel的truncate方法进行截断
         if (targetSize < (int) channel.size()) {
             channel.truncate(targetSize);
             size.set(targetSize);
         }
         return originalSize - targetSize;
     }
-
     @Override
     public ConvertedRecords<? extends Records> downConvert(byte toMagic, long firstOffset, Time time) {
         ConvertedRecords<MemoryRecords> convertedRecords = RecordsUtil.downConvert(batches, toMagic, firstOffset, time);
@@ -423,6 +426,21 @@ public class FileRecords extends AbstractRecords implements Closeable {
         return new RecordBatchIterator<>(inputStream);
     }
 
+    /**
+     * mark 打开一个 FileRecords 对象。
+     * <p>
+     * 该方法根据指定的参数打开一个文件，并返回一个 FileRecords 对象。
+     * 它首先调用 openChannel 方法打开文件通道，然后根据文件是否已经存在以及是否预分配空间，
+     * 决定 FileRecords 对象的结束位置。
+     *
+     * @param file              要打开的文件。
+     * @param mutable           是否允许文件被修改。
+     * @param fileAlreadyExists 文件是否已经存在。
+     * @param initFileSize      初始化文件大小（如果需要预分配空间）。
+     * @param preallocate       是否预分配文件空间。
+     * @return 返回一个表示文件记录的 FileRecords 对象。
+     * @throws IOException 如果在打开文件或通道时发生 I/O 错误。
+     */
     public static FileRecords open(File file,
                                    boolean mutable,
                                    boolean fileAlreadyExists,

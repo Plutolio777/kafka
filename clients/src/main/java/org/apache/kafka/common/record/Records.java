@@ -50,8 +50,11 @@ public interface Records extends TransferableRecords {
 
     // the magic offset is at the same offset for all current message formats, but the 4 bytes
     // between the size and the magic is dependent on the version.
+    // mark record batch中magic段的初始地址
     int MAGIC_OFFSET = 16;
+    // mark record batch中magic段 的长度
     int MAGIC_LENGTH = 1;
+    // mark record batch到magic的长度
     int HEADER_SIZE_UP_TO_MAGIC = MAGIC_OFFSET + MAGIC_LENGTH;
 
     /**

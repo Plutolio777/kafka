@@ -48,10 +48,13 @@ import org.apache.kafka.common.utils.Utils
 @threadsafe
 class LazyIndex[T <: AbstractIndex] private (@volatile private var indexWrapper: IndexWrapper, loadIndex: File => T) {
 
+  // mark 读写锁
   private val lock = new ReentrantLock()
 
+  // mark 获取索引文件File对象
   def file: File = indexWrapper.file
 
+  // mark 双重检查懒加载对应的索引文件信息 (只有在get的时候才会调用 loadIndex 加载真实索引)
   def get: T = {
     indexWrapper match {
       case indexValue: IndexValue[_] => indexValue.index.asInstanceOf[T]
@@ -60,8 +63,12 @@ class LazyIndex[T <: AbstractIndex] private (@volatile private var indexWrapper:
           indexWrapper match {
             case indexValue: IndexValue[_] => indexValue.index.asInstanceOf[T]
             case indexFile: IndexFile =>
+              // mark loadIndex 逻辑得看 new OffsetIndex(file, baseOffset, maxIndexSize, writable)
+              // mark IndexValue.index实际上就是 new OffsetIndex(file, baseOffset, maxIndexSize, writable) 这个是真正的索引包装类
+              /** 具体的逻辑参考 [[kafka.log.OffsetIndex]] [[kafka.log.AbstractIndex]] */
               val indexValue = new IndexValue(loadIndex(indexFile.file))
               indexWrapper = indexValue
+              // 返回对应的Index对象
               indexValue.index
           }
         }
@@ -102,8 +109,11 @@ class LazyIndex[T <: AbstractIndex] private (@volatile private var indexWrapper:
 
 object LazyIndex {
 
-  def forOffset(file: File, baseOffset: Long, maxIndexSize: Int = -1, writable: Boolean = true): LazyIndex[OffsetIndex] =
+  def forOffset(file: File, baseOffset: Long, maxIndexSize: Int = -1, writable: Boolean = true): LazyIndex[OffsetIndex] = {
+    // mark IndexFile 为索引文件的包装器
+    // mark file => new OffsetIndex(file, baseOffset, maxIndexSize, writable) 是一个工厂函数 根据文件会生成OffsetIndex
     new LazyIndex(new IndexFile(file), file => new OffsetIndex(file, baseOffset, maxIndexSize, writable))
+  }
 
   def forTime(file: File, baseOffset: Long, maxIndexSize: Int = -1, writable: Boolean = true): LazyIndex[TimeIndex] =
     new LazyIndex(new IndexFile(file), file => new TimeIndex(file, baseOffset, maxIndexSize, writable))
@@ -124,12 +134,32 @@ object LazyIndex {
 
   }
 
+  /**
+   * mark 索引文件对象的包装类 提供了针对索引文件.index结尾的文件操作
+   *
+   * @param _file 索引文件的初始文件对象
+   */
   private class IndexFile(@volatile private var _file: File) extends IndexWrapper {
 
+    /**
+     * 获取索引文件对象。
+     *
+     * @return 索引文件对象
+     */
     def file: File = _file
 
+    /**
+     * 更新索引文件的父目录。
+     *
+     * @param parentDir 新的父目录
+     */
     def updateParentDir(parentDir: File): Unit = _file = new File(parentDir, file.getName)
 
+    /**
+     * 将索引文件重命名为指定文件。
+     *
+     * @param f 新的文件对象
+     */
     def renameTo(f: File): Unit = {
       try Utils.atomicMoveWithFallback(file.toPath, f.toPath, false)
       catch {
@@ -138,14 +168,23 @@ object LazyIndex {
       finally _file = f
     }
 
+    /**
+     * 如果索引文件存在，则删除它。
+     *
+     * @return 如果文件存在且被成功删除，则返回 true；否则返回 false
+     */
     def deleteIfExists(): Boolean = Files.deleteIfExists(file.toPath)
 
+    /**
+     * 关闭索引文件。
+     */
     def close(): Unit = ()
 
+    /**
+     * 关闭处理器。
+     */
     def closeHandler(): Unit = ()
-
   }
-
   private class IndexValue[T <: AbstractIndex](val index: T) extends IndexWrapper {
 
     def file: File = index.file

@@ -98,6 +98,7 @@ class LogLoader(
    *                                           overflow index offset
    */
   def load(): LoadedLogOffsets = {
+    // mark 1.遍历日志目录中的文件并删除所有临时文件
     // First pass: through the files in the log directory and remove any temporary files
     // and find any interrupted swap operations
     // mark 清理临时日志段（这里需要注意由于存在swap文件，有的swap文件是需要进行恢复的这里判断哪些swap是有效的）
@@ -155,24 +156,30 @@ class LogLoader(
     // Fourth pass: load all the log and index files.
     // We might encounter legacy log segments with offset overflow (KAFKA-6264). We need to split such segments. When
     // this happens, restart loading segment files from scratch.
-    // mark 加载日志段以及索引文件
+    // mark 加载日志段以及索引文件（这一步会创建LogSegment并且添加到跳表中）
     retryOnOffsetOverflow(() => {
       // In case we encounter a segment with offset overflow, the retry logic will split it after which we need to retry
       // loading of segments. In that case, we also need to close all segments that could have been left open in previous
       // call to loadSegmentFiles().
+      // mark 先关闭所有的segment
       segments.close()
+      // mark 然后清空跳表
       segments.clear()
+      // mark 开始加载日志段
       loadSegmentFiles()
     })
 
     val (newRecoveryPoint: Long, nextOffset: Long) = {
+
       if (!dir.getAbsolutePath.endsWith(UnifiedLog.DeleteDirSuffix)) {
         val (newRecoveryPoint, nextOffset) = retryOnOffsetOverflow(recoverLog)
 
         // reset the index size of the currently active log segment to allow more entries
         segments.lastSegment.get.resizeIndexes(config.maxIndexSize)
         (newRecoveryPoint, nextOffset)
-      } else {
+      }
+      else {
+        // mark 如果日志段为空则必须打开一个新的segment来接收新的消息
         if (segments.isEmpty) {
           segments.add(
             LogSegment.open(
@@ -289,10 +296,10 @@ class LogLoader(
         // 尝试执行提供的函数
         return fn()
       } catch {
-        // 捕获 LogSegmentOffsetOverflowException 异常
+        // mark 如果出现偏移量溢出异常
         case e: LogSegmentOffsetOverflowException =>
           info(s"Caught segment overflow error: ${e.getMessage}. Split segment and retry.")
-          // 拆分溢出的日志段
+          // mark 拆分溢出的日志段
           val result = UnifiedLog.splitOverflowedSegment(
             e.segment,
             segments,
@@ -302,7 +309,7 @@ class LogLoader(
             scheduler,
             logDirFailureChannel,
             logIdent)
-          // 异步删除生产者快照
+          // mark 异步删除生产者快照
           deleteProducerSnapshotsAsync(result.deletedSegments)
       }
     }
@@ -326,6 +333,7 @@ class LogLoader(
       if (isIndexFile(file)) {
         // mark 根据索引的基础偏移量获取对应的log文件File对象
         val offset = offsetFromFile(file)
+        // mark 根据offset获取对应的.log日志文件
         val logFile = UnifiedLog.logFile(dir, offset)
         // mark 如果没有对应的log文件中删除
         if (!logFile.exists) {
@@ -338,13 +346,16 @@ class LogLoader(
         val baseOffset = offsetFromFile(file)
         // mark 时间索引文件是否存在
         val timeIndexFileNewlyCreated = !UnifiedLog.timeIndexFile(dir, baseOffset).exists()
+
+        // mark 打开日志文件生成segment
         val segment = LogSegment.open(
-          dir = dir,
-          baseOffset = baseOffset,
-          config,
-          time = time,
+          dir = dir, // 日志文件所在目录
+          baseOffset = baseOffset, // 日志文件基础偏移量
+          config, // 日志配置
+          time = time, // 时间工具类
           fileAlreadyExists = true)
 
+        // mark 检查segment的完整性 如果有问题则恢复索引
         try segment.sanityCheck(timeIndexFileNewlyCreated)
         catch {
           case _: NoSuchFileException =>
@@ -355,6 +366,7 @@ class LogLoader(
             warn(s"发现一个损坏的索引文件，对应于日志文件 ${segment.log.file.getAbsolutePath}，由于 ${e.getMessage}，恢复段并重建索引文件...")
             recoverSegment(segment)
         }
+        // mark 记载完成后添加到segments（跳表）中
         segments.add(segment)
       }
     }
@@ -377,14 +389,14 @@ class LogLoader(
       this.producerStateManager.producerStateManagerConfig,
       time)
     UnifiedLog.rebuildProducerState(
-      producerStateManager,
-      segments,
-      logStartOffsetCheckpoint,
-      segment.baseOffset,
-      config.recordVersion,
-      time,
-      reloadFromCleanShutdown = false,
-      logIdent)
+      producerStateManager, // 生产者状态管理器
+      segments, // 日志段集合
+      logStartOffsetCheckpoint, // 日志开始偏移
+      segment.baseOffset, //  待恢复日志段基础偏移量
+      config.recordVersion, // 记录版本
+      time, // 时间工具类
+      reloadFromCleanShutdown = false, // 是否重载
+      logIdent) // 日志标识符
     val bytesTruncated = segment.recover(producerStateManager, leaderEpochCache)
     // once we have recovered the segment's data, take a snapshot to ensure that we won't
     // need to reload the same segment again while recovering another segment.
@@ -426,6 +438,7 @@ class LogLoader(
 
     // If we have the clean shutdown marker, skip recovery.
     if (!hadCleanShutdown) {
+      // mark 根据恢复点获取恢复点之后的segment 返回一个迭代器
       val unflushed = segments.values(recoveryPointCheckpoint, Long.MaxValue)
       val numUnflushed = unflushed.size
       val unflushedIter = unflushed.iterator
@@ -440,6 +453,7 @@ class LogLoader(
 
         val truncatedBytes =
           try {
+            // mark 恢复segment
             recoverSegment(segment)
           } catch {
             case _: InvalidOffsetException =>
@@ -448,6 +462,7 @@ class LogLoader(
                 s" corrupt segment and creating an empty one with starting offset $startOffset")
               segment.truncateTo(startOffset)
           }
+        // mark 如果发生阶截断则删除所有剩余的日志不进行恢复了
         if (truncatedBytes > 0) {
           // we had an invalid message, delete all remaining log
           warn(s"Corruption found in segment ${segment.baseOffset}," +
@@ -462,9 +477,10 @@ class LogLoader(
         }
       }
     }
-
+    // mark 如果恢复点大于日志结束点则删除所有日志
     val logEndOffsetOption = deleteSegmentsIfLogStartGreaterThanLogEnd()
 
+    // mark 如果不存在日志则创建一个新的段
     if (segments.isEmpty) {
       // no existing segments, create a new mutable segment beginning at logStartOffset
       segments.add(
@@ -514,9 +530,11 @@ class LogLoader(
       // iterator to the logic that deletes the segments.
       val toDelete = segmentsToDelete.toList
       info(s"Deleting segments as part of log recovery: ${toDelete.mkString(",")}")
+      // mark 从segments跳表中删除
       toDelete.foreach { segment =>
         segments.remove(segment.baseOffset)
       }
+      // mark 删除日志文件
       UnifiedLog.deleteSegmentFiles(
         toDelete,
         asyncDelete = true,
@@ -526,6 +544,7 @@ class LogLoader(
         scheduler,
         logDirFailureChannel,
         logIdent)
+      // mark 删除生产者状态快照
       deleteProducerSnapshotsAsync(segmentsToDelete)
     }
   }

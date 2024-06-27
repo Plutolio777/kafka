@@ -20,7 +20,7 @@ import java.io.Serializable;
 import java.util.Objects;
 
 /**
- * A topic name and partition number
+ * 专门用于表示一个分区
  */
 public final class TopicPartition implements Serializable {
     private static final long serialVersionUID = -613627415771699627L;
