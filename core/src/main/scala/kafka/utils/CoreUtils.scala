@@ -284,7 +284,7 @@ object CoreUtils {
   }
 
   /**
-   * 根据监听器列表和安全协议映射，转换为EndPoints。
+   * makr 根据监听器列表和安全协议映射，转换为EndPoints。
    *
    * 此方法提供了一个从监听器名称字符串到端点序列的转换过程，它综合考虑了监听器和对应的安全协议。
    * 主要用于在Kafka中将配置的监听器信息转换为实际的服务器端点信息，以便于进一步的网络通信配置。
@@ -297,34 +297,59 @@ object CoreUtils {
     listenerListToEndPoints(listeners, securityProtocolMap, true)
   }
 
+  /**
+   * mark 将监听器列表转换为端点序列。
+   * 此函数用于根据提供的监听器字符串、安全协议映射和是否要求不同的端口参数，生成和验证端点序列。
+   *
+   * @param listeners            监听器字符串，格式为逗号分隔的监听器名称和端口组合。
+   * @param securityProtocolMap  安全协议映射，映射监听器名称到相应的安全协议。
+   * @param requireDistinctPorts 布尔值，指示是否要求每个监听器使用不同的端口。
+   * @return 返回验证后的端点序列。
+   */
   def listenerListToEndPoints(listeners: String, securityProtocolMap: Map[ListenerName, SecurityProtocol], requireDistinctPorts: Boolean): Seq[EndPoint] = {
+    /**
+     * 验证端点序列。
+     * 此内部函数用于验证生成的端点序列是否满足特定条件，如每个监听器具有不同的名称和（如果需要）端口。
+     *
+     * @param endPoints 端点序列，需要进行验证。
+     */
     def validate(endPoints: Seq[EndPoint]): Unit = {
+      // 过滤掉端口为0的端点，因为端口0通常用于测试。
       // filter port 0 for unit tests
       val portsExcludingZero = endPoints.map(_.port).filter(_ != 0)
+      // 获取所有监听器名称的唯一集合。
       val distinctListenerNames = endPoints.map(_.listenerName).distinct
 
+      // 要求监听器名称必须唯一。
       require(distinctListenerNames.size == endPoints.size, s"Each listener must have a different name, listeners: $listeners")
+      // 如果要求不同的端口，检查端口是否唯一。
       if (requireDistinctPorts) {
         val distinctPorts = portsExcludingZero.distinct
         require(distinctPorts.size == portsExcludingZero.size, s"Each listener must have a different port, listeners: $listeners")
       }
     }
 
+    // 尝试解析监听器字符串并生成端点序列。
     val endPoints = try {
+      // 解析监听器字符串为列表。
       // mark 按照逗号将listeners=PLAINTEXT://:9092,SSL://:9093分割
       val listenerList = parseCsvList(listeners)
+      // 将监听器名称和端口组合转换为端点对象。
       // mark  遍历生成EndPoint对象
       listenerList.map(EndPoint.createEndPoint(_, Some(securityProtocolMap)))
     } catch {
+      // 捕获任何异常，并抛出 IllegalArgumentException，包含详细的错误信息。
       case e: Exception =>
         throw new IllegalArgumentException(s"Error creating broker listeners from '$listeners': ${e.getMessage}", e)
     }
+    // 对生成的端点序列进行验证。
     validate(endPoints)
+    // 返回验证后的端点序列。
     endPoints
   }
 
   /**
-   * 生成一个 UUID 并将其编码为 Base64 格式的字符串。
+   * mark 生成一个 UUID 并将其编码为 Base64 格式的字符串。
    *
    * @return 编码为 Base64 格式的不带填充的 UUID 字符串
    */

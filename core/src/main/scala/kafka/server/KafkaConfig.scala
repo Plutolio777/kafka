@@ -598,6 +598,12 @@ object KafkaConfig {
    */
   val ListenerSecurityProtocolMapProp = "listener.security.protocol.map"
   val ControlPlaneListenerNameProp = "control.plane.listener.name"
+  /**
+   * <h1>socket.send.buffer.bytes</h1>
+   * <p>用于在将 Kafka 集群从基于 ZooKeeper 的元数据管理迁移到 KRaft（Kafka Raft）模式时启用元数据迁移。</p>
+   * <p>启用此配置后，Kafka 将开始将 ZooKeeper 中存储的元数据迁移到 KRaft 控制器中管理。</p>
+   * <p>默认值 false</p>
+   */
   val SocketSendBufferBytesProp = "socket.send.buffer.bytes"
   val SocketReceiveBufferBytesProp = "socket.receive.buffer.bytes"
   val SocketRequestMaxBytesProp = "socket.request.max.bytes"
@@ -1750,6 +1756,7 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
   // mark 创建了一个zookeeper配置对象 直接调用的原生API 这个里面会加载一些系统配置以及JVM相关配置
   private val zkClientConfigViaSystemProperties = new ZKClientConfig()
 
+  // mark kafka配置不会更改底层原始的配置 如果不一样的话默认使用当前类的配置
   override def originals: util.Map[String, AnyRef] =
     if (this eq currentConfig) super.originals else currentConfig.originals
   override def values: util.Map[String, _] =
@@ -1819,11 +1826,13 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
       KafkaConfig.zooKeeperClientProperty(zkClientConfigViaSystemProperties, propKey)
     }
   }
+
   private def zkPasswordConfigOrSystemProperty(propKey: String): Option[Password] = {
     Option(getPassword(propKey)).orElse {
       KafkaConfig.zooKeeperClientProperty(zkClientConfigViaSystemProperties, propKey).map(new Password(_))
     }
   }
+
   private def zkListConfigOrSystemProperty(propKey: String): Option[util.List[String]] = {
     Option(getList(propKey)).orElse {
       KafkaConfig.zooKeeperClientProperty(zkClientConfigViaSystemProperties, propKey).map { sysProp =>
@@ -1881,8 +1890,7 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
   // mark broker.session.timeout.ms用于控制Broker与Controller的session会话超时时间
   val brokerSessionTimeoutMs: Int = getInt(KafkaConfig.BrokerSessionTimeoutMsProp)
 
-  // mark 如果角色集合为空则不需要zookeeper 也就是说如果配置中直接指定了broker的角色 则不需要zookeeper
-  // mark 因为在zookeeper中是不需要自己管理集群角色的 都是交给zookeeper去做
+  // mark process roles 是给raft使用的 zookeeper是不需要角色的
   def requiresZookeeper: Boolean = processRoles.isEmpty
 
   // mark 如果角色集合不为空则启动自我管理仲裁机制（不依赖zookeeper采用Kraft协议）
@@ -2004,22 +2012,45 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
     }
   }
 
+  /**
+   * mark 提取并验证早期启动监听器的名称。(kraft在启动初期就可以提供服务)
+   *
+   * 早期启动监听器是指在Kafka服务器启动过程中需要提前启动的一组监听器。这个值是从配置中获取的，
+   * 并且需要与`listeners`和`controllerListeners`配置中的监听器名称匹配。如果配置中指定了早期启动监听器，
+   * 但它们并未在其他监听器配置中定义，那么将抛出配置异常。
+   *
+   * @return 一个集合，包含所有指定为早期启动的监听器名称。
+   */
   val earlyStartListeners: Set[ListenerName] = {
+    // 提取并转换`listeners`配置中的监听器名称，形成一个集合
+    // mark 获取监听器名称
     val listenersSet = listeners.map(_.listenerName).toSet
+    // 提取并转换`controllerListeners`配置中的监听器名称，形成一个集合
+    // mark kraft模式下的控制器监听器名称
     val controllerListenersSet = controllerListeners.map(_.listenerName).toSet
+
+    // 根据配置中是否指定了早期启动监听器，采取不同的处理策略
+    // mark 早起监听器名称
     Option(getString(KafkaConfig.EarlyStartListenersProp)) match {
+      // 如果没有指定早期启动监听器，则认为所有控制器监听器都是早期启动监听器
       case None => controllerListenersSet
+      // 如果指定了早期启动监听器，则进行进一步的验证和处理
       case Some(str) =>
+        // 分割字符串，去除空格，并过滤空字符串，形成早期启动监听器名称的集合
         str.split(",").map(_.trim()).filterNot(_.isEmpty).map { str =>
+          // 创建一个监听器名称对象
           val listenerName = new ListenerName(str)
+          // 验证该监听器名称是否在其他监听器配置中存在，如果不存在，则抛出配置异常
           if (!listenersSet.contains(listenerName) && !controllerListenersSet.contains(listenerName))
             throw new ConfigException(s"${KafkaConfig.EarlyStartListenersProp} contains " +
               s"listener ${listenerName.value()}, but this is not contained in " +
               s"${KafkaConfig.ListenersProp} or ${KafkaConfig.ControllerListenerNamesProp}")
+          // 如果验证通过，将监听器名称添加到结果集合中
           listenerName
         }.toSet
     }
   }
+
 
   /** ********* Socket Server Configuration ***********/
   val socketSendBufferBytes = getInt(KafkaConfig.SocketSendBufferBytesProp)
@@ -2043,6 +2074,7 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
   val numPartitions = getInt(KafkaConfig.NumPartitionsProp)
   /** log.dirs:卡夫卡的日志目录，默认为/tmp/kafka-logs */
   val logDirs = CoreUtils.parseCsvList(Option(getString(KafkaConfig.LogDirsProp)).getOrElse(getString(KafkaConfig.LogDirProp)))
+
   def logSegmentBytes = getInt(KafkaConfig.LogSegmentBytesProp)
   def logFlushIntervalMessages = getLong(KafkaConfig.LogFlushIntervalMessagesProp)
   val logCleanerThreads = getInt(KafkaConfig.LogCleanerThreadsProp)
@@ -2114,6 +2146,7 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
   // We keep the user-provided String as `MetadataVersion.fromVersionString` can choose a slightly different version (eg if `0.10.0`
   // is passed, `0.10.0-IV0` may be picked)
   val interBrokerProtocolVersionString = getString(KafkaConfig.InterBrokerProtocolVersionProp)
+
   val interBrokerProtocolVersion = if (processRoles.isEmpty) {
     MetadataVersion.fromVersionString(interBrokerProtocolVersionString)
   } else {
@@ -2189,15 +2222,25 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
       Set.empty[String]
   }
 
-  def interBrokerListenerName = getInterBrokerListenerNameAndSecurityProtocol._1
-  def interBrokerSecurityProtocol = getInterBrokerListenerNameAndSecurityProtocol._2
-  def controlPlaneListenerName = getControlPlaneListenerNameAndSecurityProtocol.map { case (listenerName, _) => listenerName }
-  def controlPlaneSecurityProtocol = getControlPlaneListenerNameAndSecurityProtocol.map { case (_, securityProtocol) => securityProtocol }
-  def saslMechanismInterBrokerProtocol = getString(KafkaConfig.SaslMechanismInterBrokerProtocolProp)
-  val saslInterBrokerHandshakeRequestEnable = interBrokerProtocolVersion.isSaslInterBrokerHandshakeRequestEnabled()
+  // mark 返回集群内部通信监听器的名称，通过访问预定义的元组的第一项实现
+  def interBrokerListenerName: ListenerName = getInterBrokerListenerNameAndSecurityProtocol._1
+
+  // mark 返回集群内部通信的安全协议，通过访问预定义的元组的第二项实现
+  def interBrokerSecurityProtocol: SecurityProtocol = getInterBrokerListenerNameAndSecurityProtocol._2
+
+  // mark 返回控制平面监听器的名称，通过对包含监听器名称和安全协议的元组进行映射操作，仅保留监听器名称
+  def controlPlaneListenerName: Option[ListenerName] = getControlPlaneListenerNameAndSecurityProtocol.map { case (listenerName, _) => listenerName }
+
+  // mark 返回控制平面使用的安全协议，通过对包含监听器名称和安全协议的元组进行映射操作，仅保留安全协议
+  def controlPlaneSecurityProtocol: Option[SecurityProtocol] = getControlPlaneListenerNameAndSecurityProtocol.map { case (_, securityProtocol) => securityProtocol }
+
+  // mark 集群内部如果使用sasl通信需要指定通信机制
+  def saslMechanismInterBrokerProtocol: String = getString(KafkaConfig.SaslMechanismInterBrokerProtocolProp)
+
+  val saslInterBrokerHandshakeRequestEnable: Boolean = interBrokerProtocolVersion.isSaslInterBrokerHandshakeRequestEnabled()
 
   /** ********* DelegationToken Configuration **************/
-  val delegationTokenSecretKey = Option(getPassword(KafkaConfig.DelegationTokenSecretKeyProp))
+  val delegationTokenSecretKey: Password = Option(getPassword(KafkaConfig.DelegationTokenSecretKeyProp))
     .getOrElse(getPassword(KafkaConfig.DelegationTokenSecretKeyAliasProp))
   val tokenAuthEnabled = (delegationTokenSecretKey != null && !delegationTokenSecretKey.value.isEmpty)
   val delegationTokenMaxLifeMs = getLong(KafkaConfig.DelegationTokenMaxLifeTimeProp)
@@ -2308,46 +2351,100 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
     }
   }
 
-  // Use advertised listeners if defined, fallback to listeners otherwise
+  /**
+   * 获取有效的外部监听器Endpoint集合。
+   *
+   * 此方法用于确定Kafka服务器将向客户端宣传的监听器列表。这个列表可能包括所有监听器，
+   * 但也可能根据配置和需求进行筛选，例如，不包括用于控制器通信的监听器。
+   *
+   * @return 序列化的端点列表，表示有效的广告监听器。
+   */
   def effectiveAdvertisedListeners: Seq[EndPoint] = {
+    // 获取配置中指定的广告监听器属性
     val advertisedListenersProp = getString(KafkaConfig.AdvertisedListenersProp)
-    if (advertisedListenersProp != null)
+    // 如果广告监听器属性不为空
+    if (advertisedListenersProp != null) {
+      // 将监听器列表转换为端点列表
       CoreUtils.listenerListToEndPoints(advertisedListenersProp, effectiveListenerSecurityProtocolMap, requireDistinctPorts=false)
-    else
+    } else {
+      // 如果广告监听器属性为空，筛选出不包括控制器监听器名的监听器
       listeners.filterNot(l => controllerListenerNames.contains(l.listenerName.value()))
+    }
   }
 
+
+  /**
+   * 获取inter-broker监听器名称和安全协议。
+   *
+   * 此方法用于确定用于inter-broker通信的监听器名称和安全协议。它根据配置的不同情况，
+   * 从以下两种方式中选择一种来决定监听器名称和安全协议：
+   * 1. 如果设置了`inter.broker.listener.name`，则使用该名称并从`listener.security.protocol.map`中查找对应的安全协议。
+   * 2. 如果没有设置`inter.broker.listener.name`，则直接使用`inter.broker.security.protocol`配置的安全协议。
+   *
+   * @return 一个包含监听器名称和安全协议的元组。
+   * @throws ConfigException 如果同时设置了`inter.broker.listener.name`和`inter.broker.security.protocol`，或者
+   *                         指定的监听器名称在`listener.security.protocol.map`中找不到对应的配置，则抛出此异常。
+   */
   private def getInterBrokerListenerNameAndSecurityProtocol: (ListenerName, SecurityProtocol) = {
+    // 检查是否同时设置了inter.broker.listener.name和inter.broker.security.protocol
     Option(getString(KafkaConfig.InterBrokerListenerNameProp)) match {
       case Some(_) if originals.containsKey(KafkaConfig.InterBrokerSecurityProtocolProp) =>
+        // mark 如果同时设置了两者，则抛出ConfigException异常
         throw new ConfigException(s"Only one of ${KafkaConfig.InterBrokerListenerNameProp} and " +
           s"${KafkaConfig.InterBrokerSecurityProtocolProp} should be set.")
       case Some(name) =>
+        // 如果设置了inter.broker.listener.name，获取其规范化名称，并从listener.security.protocol.map中查找对应的安全协议
         val listenerName = ListenerName.normalised(name)
+        // mark 根据监听器名称获取对应的协议
         val securityProtocol = effectiveListenerSecurityProtocolMap.getOrElse(listenerName,
           throw new ConfigException(s"Listener with name ${listenerName.value} defined in " +
             s"${KafkaConfig.InterBrokerListenerNameProp} not found in ${KafkaConfig.ListenerSecurityProtocolMapProp}."))
         (listenerName, securityProtocol)
       case None =>
+        // mark 如果没有设置inter.broker.listener.name，直接使用inter.broker.security.protocol配置的安全协议(去默认值)
+        // mark 并根据安全协议确定默认的监听器名称
         val securityProtocol = getSecurityProtocol(getString(KafkaConfig.InterBrokerSecurityProtocolProp),
           KafkaConfig.InterBrokerSecurityProtocolProp)
         (ListenerName.forSecurityProtocol(securityProtocol), securityProtocol)
     }
   }
 
+
+  /**
+   * 获取控制面监听器名称及其安全协议。
+   *
+   * 此方法尝试从配置中获取控制面监听器的名称和安全协议。它首先检查是否存在
+   * 控制面监听器名称的配置，如果存在，它将验证该监听器名称是否在配置的安全协议映射中定义。
+   * 如果监听器名称不存在于映射中，将抛出配置异常。如果不存在控制面监听器名称的配置，
+   * 则方法返回None。
+   *
+   * @return 可选的监听器名称和安全协议对。如果配置中没有定义控制面监听器名称，则为None。
+   */
   private def getControlPlaneListenerNameAndSecurityProtocol: Option[(ListenerName, SecurityProtocol)] = {
+    // mark 尝试从配置中获取控制面监听器名称
     Option(getString(KafkaConfig.ControlPlaneListenerNameProp)) match {
       case Some(name) =>
+        // 标准化监听器名称
         val listenerName = ListenerName.normalised(name)
+        // 从安全协议映射中获取监听器的安全协议，如果不存在则抛出异常
         val securityProtocol = effectiveListenerSecurityProtocolMap.getOrElse(listenerName,
           throw new ConfigException(s"Listener with ${listenerName.value} defined in " +
             s"${KafkaConfig.ControlPlaneListenerNameProp} not found in ${KafkaConfig.ListenerSecurityProtocolMapProp}."))
+        // 返回监听器名称和安全协议的组合
         Some(listenerName, securityProtocol)
 
       case None => None
-   }
+    }
   }
 
+  /**
+   * 根据协议名称从默认协议映射获取协议名称。
+   *
+   * @param protocolName 协议名称，用于查找相应的安全协议。
+   * @param configName   配置名称，用于在抛出异常时提供上下文信息。
+   * @return 成功时返回对应的SecurityProtocol实例。
+   * @throws ConfigException 如果协议名称无效，则抛出此异常。
+   */
   private def getSecurityProtocol(protocolName: String, configName: String): SecurityProtocol = {
     try SecurityProtocol.forName(protocolName)
     catch {
@@ -2355,7 +2452,6 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
         throw new ConfigException(s"Invalid security protocol `$protocolName` defined in $configName")
     }
   }
-
   /**
    * 获取有效监听器安全协议映射。
    *
@@ -2403,6 +2499,20 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
 
   validateValues()
 
+  /**
+   * 验证配置值的有效性。
+   * 此方法检查配置是否符合运行要求，包括但不限于：
+   * - nodeId 和 brokerId 的一致性
+   * - ZooKeeper 配置的完整性
+   * - KRaft 模式下的配置要求
+   * - 日志滚动和保留时间的合理性
+   * - 日志目录和清洁器缓冲区的配置
+   * - 复制和偏移提交的配置
+   * - 压缩类型的有效性
+   * - 听众名称和协议的匹配性
+   *
+   * @throws ConfigException 如果配置不满足要求
+   */
   @nowarn("cat=deprecation")
   private def validateValues(): Unit = {
     if (nodeId != brokerId) {
@@ -2417,7 +2527,8 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
       } else {
         require(brokerId >= 0, "broker.id must be greater than or equal to 0")
       }
-    } else {
+    }
+    else {
       // KRaft-based metadata quorum
       if (nodeId < 0) {
         throw new ConfigException(s"Missing configuration `${KafkaConfig.NodeIdProp}` which is required " +
@@ -2509,7 +2620,8 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
         warn(s"${KafkaConfig.ControllerListenerNamesProp} has multiple entries; only the first will be used since ${KafkaConfig.ProcessRolesProp}=broker: ${controllerListenerNames.asJava}")
       }
       validateAdvertisedListenersNonEmptyForBroker()
-    } else if (processRoles == Set(ControllerRole)) {
+    }
+    else if (processRoles == Set(ControllerRole)) {
       // KRaft controller-only
       validateNonEmptyQuorumVotersForKRaft()
       validateControlPlaneListenerEmptyForKRaft()
@@ -2526,7 +2638,8 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
       validateControllerQuorumVotersMustContainNodeIdForKRaftController()
       validateControllerListenerExistsForKRaftController()
       validateControllerListenerNamesMustAppearInListenersForKRaftController()
-    } else if (isKRaftCoResidentMode) {
+    }
+    else if (isKRaftCoResidentMode) {
       // KRaft colocated broker and controller
       validateNonEmptyQuorumVotersForKRaft()
       validateControlPlaneListenerEmptyForKRaft()
@@ -2535,7 +2648,8 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
       validateControllerListenerExistsForKRaftController()
       validateControllerListenerNamesMustAppearInListenersForKRaftController()
       validateAdvertisedListenersNonEmptyForBroker()
-    } else {
+    }
+    else {
       // ZK-based
       if (migrationEnabled) {
         require(!originals.containsKey(KafkaConfig.AuthorizerClassNameProp),

@@ -517,18 +517,34 @@ public class AbstractConfig {
         }
     }
 
+    /**
+     * 提取配置映射中的潜在变量。
+     * <p>
+     * 该方法从一个泛型映射中筛选出所有值为字符串的条目，并将它们转换为一个字符串键值对的映射。
+     * 这样做的目的是为了处理配置数据，其中某些配置项可能是字符串形式的变量，这些变量需要被提取出来以便进一步处理。
+     *
+     * @param configMap 原始的配置映射，可以包含各种类型的值。
+     * @return 返回一个只包含字符串键值对的映射，这些映射被视为潜在的变量。
+     */
     private Map<String, String> extractPotentialVariables(Map<?, ?> configMap) {
+        // 初始化一个空的字符串映射，用于存储提取的潜在变量
         // Variables are tuples of the form "${providerName:[path:]key}". From the configMap we extract the subset of configs with string
         // values as potential variables.
         // mark 把传入的配置为字符串的
         Map<String, String> configMapAsString = new HashMap<>();
+
+        // 遍历原始配置映射的所有条目
         for (Map.Entry<?, ?> entry : configMap.entrySet()) {
-            if (entry.getValue() instanceof String)
+            // 检查当前条目的值是否为字符串，如果是，则将键值对添加到新的映射中
+            if (entry.getValue() instanceof String) {
                 configMapAsString.put((String) entry.getKey(), (String) entry.getValue());
+            }
         }
 
+        // 返回只包含字符串键值对的映射
         return configMapAsString;
     }
+
 
     /**
      * 解析配置变量的值。
@@ -583,14 +599,30 @@ public class AbstractConfig {
     }
 
 
+    /**
+     * 根据配置提供者前缀过滤配置属性。
+     * 该方法旨在从一组通用的配置属性中筛选出特定配置提供者的属性。它通过比较属性键的前缀来实现过滤，
+     * 只保留那些前缀匹配且不完全等于前缀的属性。
+     *
+     * @param configProviderPrefix 配置提供者的前缀，用于筛选属性。
+     * @param providerConfigProperties 通用的配置属性集合，可能包含多个配置提供者的属性。
+     * @return 过滤后的属性集合，仅包含匹配前缀的属性。
+     */
     private Map<String, Object> configProviderProperties(String configProviderPrefix, Map<String, ?> providerConfigProperties) {
+        // 初始化结果映射，用于存储过滤后的属性
         Map<String, Object> result = new HashMap<>();
+        // 遍历提供的配置属性集合
         for (Map.Entry<String, ?> entry : providerConfigProperties.entrySet()) {
             String key = entry.getKey();
+            // 检查当前属性键是否以指定的配置提供者前缀开始，并且长度大于前缀长度
+            // 这样可以确保选取的属性键不仅仅是前缀，而是确实属于配置提供者的特定属性
             if (key.startsWith(configProviderPrefix) && key.length() > configProviderPrefix.length()) {
+                // 如果条件满足，将属性键（去除前缀）和属性值添加到结果映射中
+                // 这样做可以将属性键与特定配置提供者解耦，便于后续处理和使用
                 result.put(key.substring(configProviderPrefix.length()), entry.getValue());
             }
         }
+        // 返回过滤后的属性集合
         return result;
     }
 

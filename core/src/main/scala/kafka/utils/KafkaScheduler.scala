@@ -75,7 +75,7 @@ class KafkaScheduler(val threads: Int,
   private val schedulerThreadId = new AtomicInteger(0)
 
   /**
-   * 启动任务调度器。
+   * mark 启动任务调度器。
    * 该方法初始化任务调度器，并配置执行器以特定的策略运行任务。
    * 注意：如果调度器已经启动，将抛出 IllegalStateException 异常。
    */

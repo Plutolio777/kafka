@@ -29,8 +29,17 @@ object EndPoint {
 
   private val uriParseExp = """^(.*)://\[?([0-9a-zA-Z\-%._:]*)\]?:(-?[0-9]+)""".r
 
+  /**
+   * 定义了Kafka默认的安全协议映射。
+   *
+   * 此映射将监听器名称与安全协议关联起来，以便在不需要显式配置的情况下，
+   * 可以根据监听器的名称自动选择正确的安全协议。
+   *
+   * @see SecurityProtocol
+   */
   private[kafka] val DefaultSecurityProtocolMap: Map[ListenerName, SecurityProtocol] =
     SecurityProtocol.values.map(sp => ListenerName.forSecurityProtocol(sp) -> sp).toMap
+
 
   /**
    * 根据连接字符串和安全协议映射创建EndPoint对象。

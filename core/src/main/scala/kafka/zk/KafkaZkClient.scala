@@ -609,6 +609,20 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
    */
   def setTopicIds(topicIdReplicaAssignments: collection.Set[TopicIdReplicaAssignment],
                   expectedControllerEpochZkVersion: Int): Set[TopicIdReplicaAssignment] = {
+    /**
+     * mark 确保ZooKeeper中指定的持久化路径存在。
+     *
+     * 本方法通过递归创建路径的方式，确保给定的路径在ZooKeeper中存在。
+     * 如果路径已存在，則不会抛出异常；如果路径不存在，则会创建该路径。
+     *
+     * @param path 要确保存在的ZooKeeper路径。
+     */
+    def makeSurePersistentPathExists(path: String): Unit = {
+      // 通过递归方式创建路径，不抛出异常如果路径已存在
+      // mark 递归创建 throwIfPathExists 表示节点存在不抛出异常
+      createRecursive(path, data = null, throwIfPathExists = false)
+    }
+
     val updatedAssignments = topicIdReplicaAssignments.map {
       case TopicIdReplicaAssignment(topic, None, assignments) =>
         TopicIdReplicaAssignment(topic, Some(Uuid.randomUuid()), assignments)
@@ -1959,10 +1973,26 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
 
   def secure: Boolean = isSecure
 
+  /**
+   * 尝试重试发送请求直到与ZooKeeper连接成功。
+   * 此方法专门处理单个请求，直到与ZooKeeper建立连接为止。
+   *
+   * @param request                     需要发送的异步请求。
+   * @param expectedControllerZkVersion 期望的控制器ZooKeeper版本，用于匹配版本。
+   * @return 请求的响应。
+   */
   private[zk] def retryRequestUntilConnected[Req <: AsyncRequest](request: Req, expectedControllerZkVersion: Int = ZkVersion.MatchAnyVersion): Req#Response = {
     retryRequestsUntilConnected(Seq(request), expectedControllerZkVersion).head
   }
 
+  /**
+   * 尝试重试发送一组请求，直到与ZooKeeper连接成功。
+   * 根据期望的控制器ZooKeeper版本，可能需要对请求进行版本检查。
+   *
+   * @param requests                    需要发送的异步请求序列。
+   * @param expectedControllerZkVersion 期望的控制器ZooKeeper版本，用于匹配版本。
+   * @return 请求的响应序列。
+   */
   private def retryRequestsUntilConnected[Req <: AsyncRequest](requests: Seq[Req], expectedControllerZkVersion: Int): Seq[Req#Response] = {
     expectedControllerZkVersion match {
       case ZkVersion.MatchAnyVersion => retryRequestsUntilConnected(requests)
@@ -1970,8 +2000,53 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
         retryRequestsUntilConnected(requests.map(wrapRequestWithControllerEpochCheck(_, version)))
           .map(unwrapResponseWithControllerEpochCheck(_).asInstanceOf[Req#Response])
       case invalidVersion =>
+        // 如果期望的控制器ZooKeeper版本无效（负数），抛出异常。
         throw new IllegalArgumentException(s"Expected controller epoch zkVersion $invalidVersion should be non-negative or equal to ${ZkVersion.MatchAnyVersion}")
     }
+  }
+
+  /**
+   * 在与ZooKeeper建立连接后，重试发送请求。
+   * 当在发送请求过程中失去与ZooKeeper的连接时，此方法处理请求的重试情况。
+   *
+   * @param requests 要发送到ZooKeeper的异步请求序列。
+   * @return 请求的响应结果序列。
+   */
+  private def retryRequestsUntilConnected[Req <: AsyncRequest](requests: Seq[Req]): Seq[Req#Response] = {
+    val remainingRequests = new mutable.ArrayBuffer(requests.size) ++= requests
+    val responses = new mutable.ArrayBuffer[Req#Response]
+    // 循环处理请求，直到剩余请求为空
+    while (remainingRequests.nonEmpty) {
+      // mark 处理请求方法
+      val batchResponses = zooKeeperClient.handleRequests(remainingRequests)
+
+      // 更新延迟度量
+      batchResponses.foreach(response => latencyMetric.update(response.metadata.responseTimeMs))
+
+      // mark 如果存在CONNECTIONLOSS（连接丢失）结果码，
+      if (batchResponses.exists(_.resultCode == Code.CONNECTIONLOSS)) {
+        // mark 请求和响应进行配对
+        val requestResponsePairs = remainingRequests.zip(batchResponses)
+
+        // mark 将连接失败的请求拿出来后续再重新请求
+        remainingRequests.clear()
+        requestResponsePairs.foreach { case (request, response) =>
+          if (response.resultCode == Code.CONNECTIONLOSS)
+            remainingRequests += request
+          else
+            responses += response
+        }
+
+        // mark 如果仍有未处理的请求，等待ZooKeeper重新连接（这个地方是无期限阻塞）
+        if (remainingRequests.nonEmpty)
+          zooKeeperClient.waitUntilConnected()
+      } else {
+        // 没有CONNECTIONLOSS，直接清空并添加所有响应
+        remainingRequests.clear()
+        responses ++= batchResponses
+      }
+    }
+    responses
   }
 
   /**
@@ -2105,49 +2180,7 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
     }
   }
 
-  /**
-   * 在与ZooKeeper建立连接后，重试发送请求。
-   * 当在发送请求过程中失去与ZooKeeper的连接时，此方法处理请求的重试情况。
-   *
-   * @param requests 要发送到ZooKeeper的异步请求序列。
-   * @return 请求的响应结果序列。
-   */
-  private def retryRequestsUntilConnected[Req <: AsyncRequest](requests: Seq[Req]): Seq[Req#Response] = {
-    val remainingRequests = new mutable.ArrayBuffer(requests.size) ++= requests
-    val responses = new mutable.ArrayBuffer[Req#Response]
-    // 循环处理请求，直到剩余请求为空
-    while (remainingRequests.nonEmpty) {
-      // mark 处理请求方法
-      val batchResponses = zooKeeperClient.handleRequests(remainingRequests)
 
-      // 更新延迟度量
-      batchResponses.foreach(response => latencyMetric.update(response.metadata.responseTimeMs))
-
-      // mark 如果存在CONNECTIONLOSS（连接丢失）结果码，
-      if (batchResponses.exists(_.resultCode == Code.CONNECTIONLOSS)) {
-        // mark 请求和响应进行配对
-        val requestResponsePairs = remainingRequests.zip(batchResponses)
-
-        // mark 将连接失败的请求拿出来后续再重新请求
-        remainingRequests.clear()
-        requestResponsePairs.foreach { case (request, response) =>
-          if (response.resultCode == Code.CONNECTIONLOSS)
-            remainingRequests += request
-          else
-            responses += response
-        }
-
-        // mark 如果仍有未处理的请求，等待ZooKeeper重新连接（这个地方是无期限阻塞）
-        if (remainingRequests.nonEmpty)
-          zooKeeperClient.waitUntilConnected()
-      } else {
-        // 没有CONNECTIONLOSS，直接清空并添加所有响应
-        remainingRequests.clear()
-        responses ++= batchResponses
-      }
-    }
-    responses
-  }
 
 
   private def checkedEphemeralCreate(path: String, data: Array[Byte]): Stat = {

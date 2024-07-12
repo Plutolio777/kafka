@@ -157,7 +157,7 @@ case class MetaProperties(
 object BrokerMetadataCheckpoint extends Logging {
 
   /**
-   * 获取Broker元数据和离线目录。
+   * mark 获取Broker元数据和离线目录。
    *
    * 从给定的日志目录中读取元数据，并识别任何离线目录。如果指定了忽略缺失的元数据，
    * 则不会因未找到元数据文件而抛出异常。
@@ -250,21 +250,38 @@ object BrokerMetadataCheckpoint extends Logging {
 class BrokerMetadataCheckpoint(val file: File) extends Logging {
   private val lock = new Object()
 
+  /**
+   * 将给定的属性对象写入到指定的文件中。
+   * 此方法使用同步锁来确保并发访问时的线程安全。
+   * 它首先将内容写入一个临时文件，然后使用原子操作将临时文件移动到目标文件位置，
+   * 这样可以减少在写入过程中文件内容部分更新的风险。
+   *
+   * @param properties 要写入文件的属性对象。
+   */
   def write(properties: Properties): Unit = {
+    // 使用同步锁来确保线程安全
     lock synchronized {
       try {
+        // mark 创建一个临时文件，用于实际的写入操作
         val temp = new File(file.getAbsolutePath + ".tmp")
+        // 打开文件输出流，用于向临时文件写入属性内容
         val fileOutputStream = new FileOutputStream(temp)
         try {
+          // mark 将属性对象写入文件输出流
           properties.store(fileOutputStream, "")
+          // mark 确保所有写入操作都刷新到磁盘
           fileOutputStream.flush()
+          // 强制将文件描述符对应的文件内容同步到磁盘
           fileOutputStream.getFD.sync()
         } finally {
+          // 关闭文件输出流，并删除临时文件，异常情况下也会执行
           Utils.closeQuietly(fileOutputStream, temp.getName)
         }
+        // mark 使用原子操作将临时文件移动到目标文件位置，以替代直接写入，提高文件完整性
         Utils.atomicMoveWithFallback(temp.toPath, file.toPath)
       } catch {
         case ie: IOException =>
+          // 记录写入失败的错误信息，并重新抛出异常
           error("Failed to write meta.properties due to", ie)
           throw ie
       }

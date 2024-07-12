@@ -33,8 +33,7 @@ object ZkConfigRepository {
 class ZkConfigRepository(adminZkClient: AdminZkClient) extends ConfigRepository {
 
   /**
-   * 获取配置资源的属性
-   * 该方法根据提供的配置资源类型（主题或代理）和名称从 ZooKeeper 中获取相应的配置属性。
+   * 该方法获取Broker配置或者Topic配置
    *
    * @param configResource 配置资源对象，包含资源类型和名称
    * @return 包含配置属性的 Properties 对象

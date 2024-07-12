@@ -89,6 +89,7 @@ object Kafka extends Logging {
         config,
         Time.SYSTEM,
         threadNamePrefix = None,
+        // mark 是否启用API转发
         enableForwarding = enableApiForwarding(config)
       )
     } else {

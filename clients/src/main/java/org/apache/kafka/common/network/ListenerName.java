@@ -41,7 +41,7 @@ public final class ListenerName {
     }
 
     /**
-     * 创建一个实例，其中提供的值会被转换为大写。
+     * mark 创建一个实例，其中提供的值会被转换为大写。
      *
      * @param value 用于创建ListenerName实例的字符串值，将会被转换成大写形式。
      * @return 新建的ListenerName实例。

@@ -28,21 +28,40 @@ import scala.collection.mutable.ArrayBuffer
 
 
 /**
- * Base trait for reporter MBeans. If a client wants to expose these JMX
- * operations on a custom reporter (that implements
- * [[kafka.metrics.KafkaMetricsReporter]]), the custom reporter needs to
- * additionally implement an MBean trait that extends this trait so that the
- * registered MBean is compliant with the standard MBean convention.
+ * The base trait for Kafka Metrics Reporter MBeans, defining the JMX operations exposed by the reporter.
+ * KafkaMetricsReporterMBean的作用是为Kafka指标报告器提供一个标准的MBean接口。
+ * 如果需要自定义报告器实现kafka.metrics.KafkaMetricsReporter，并且希望在JMX中注册这些操作，
+ * 那么自定义报告器需要实现这个MBean特征。
  */
 trait KafkaMetricsReporterMBean {
+
+  /**
+   * Starts the reporter.
+   * 启动报告器，开始按照指定的轮询周期收集和报告指标。
+   *
+   * @param pollingPeriodInSeconds The polling period in seconds for metrics collection and reporting.
+   */
   def startReporter(pollingPeriodInSeconds: Long): Unit
+
+  /**
+   * Stops the reporter.
+   * 停止报告器，不再收集和报告指标。
+   */
   def stopReporter(): Unit
+
+  /**
+   * Gets the MBean name for registration.
+   * 返回报告器的MBean名称，这个名称用于在JMX中注册报告器。
+   *
+   * @return The MBean name string.
+   */
   /**
    *
    * @return The name with which the MBean will be registered.
    */
   def getMBeanName: String
 }
+
 
 /**
   * Implement {@link org.apache.kafka.common.ClusterResourceListener} to receive cluster metadata once it's available. Please see the class documentation for ClusterResourceListener for more information.

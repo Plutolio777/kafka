@@ -461,29 +461,31 @@ public class ConfigDef {
     }
 
     /**
-     * Parse and validate configs against this configuration definition. The input is a map of configs. It is expected
-     * that the keys of the map are strings, but the values can either be strings or they may already be of the
-     * appropriate type (int, string, etc). This will work equally well with either java.util.Properties instances or a
-     * programmatically constructed map.
+     * 解析并验证配置项以确保它们符合当前的配置定义。此方法接收一个包含配置项的Map作为输入，其中键通常为String类型，
+     * 而值可以是String或其它类型（如int）。无论输入是java.util.Properties对象还是通过编程方式构建的Map，此方法均能妥善处理。
      *
-     * @param props The configs to parse and validate.
-     * @return Parsed and validated configs. The key will be the config name and the value will be the value parsed into
-     * the appropriate type (int, string, etc).
+     * @param props 待解析与验证的配置项Map。
+     * @return 一个Map，其中键为配置项名称，值为已解析并转换为适当类型（如int、String等）的配置值。
+     * @throws ConfigException 当存在未定义但被引用的配置项时，将抛出此异常。
      */
     public Map<String, Object> parse(Map<?, ?> props) {
-        // mark 检查配置依赖定义是否正确 如果不正确则抛出异常 undefinedDependentConfigs
+        // mark 检查配置项中的依赖关系，确保所有被引用的配置项都已定义
         List<String> undefinedConfigKeys = undefinedDependentConfigs();
+        // mark 如果发现有未定义的配置项，则抛出异常
         if (!undefinedConfigKeys.isEmpty()) {
             String joined = Utils.join(undefinedConfigKeys, ",");
             throw new ConfigException("Some configurations in are referred in the dependents, but not defined: " + joined);
         }
-        // parse all known keys
-        // mark 根据配置定义从props中秋凷正确的配置 如果不存在则填充默认值
+        // mark 创建一个新的Map来存放解析后的配置项
         Map<String, Object> values = new HashMap<>();
+        // mark 遍历所有已知的配置项，从输入Map中提取相应的值，并进行解析
         for (ConfigKey key : configKeys.values())
+            // mark 将解析后的配置项值放入新Map中
             values.put(key.name, parseValue(key, props.get(key.name), props.containsKey(key.name)));
+        // mark 返回解析后的配置项Map
         return values;
     }
+
 
     /**
      * 解析给定的配置键对应的值。

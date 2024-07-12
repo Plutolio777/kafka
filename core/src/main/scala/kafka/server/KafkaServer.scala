@@ -114,7 +114,7 @@ class KafkaServer(
 
   private var logContext: LogContext = _
 
-  // mark 处理指标报告器的相关配置
+  // mark 处理指标报告器的相关配置（这里只是创建了空容器没有实装）
   private val kafkaMetricsReporters: Seq[KafkaMetricsReporter] =
     KafkaMetricsReporter.startReporters(VerifiableProperties(config.originals))
   var kafkaYammerMetrics: KafkaYammerMetrics = _
@@ -122,6 +122,7 @@ class KafkaServer(
 
   // mark 数据面板处理器
   @volatile var dataPlaneRequestProcessor: KafkaApis = _
+
   // mark 控制面板处理器
   var controlPlaneRequestProcessor: KafkaApis = _
 
@@ -169,6 +170,9 @@ class KafkaServer(
   private var configRepository: ZkConfigRepository = _
 
   val correlationId: AtomicInteger = new AtomicInteger(0)
+
+
+  // mark 获取每个日志文件目录下的meta.properties BrokerMetadataCheckpoint
   val brokerMetaPropsFile = "meta.properties"
   val brokerMetadataCheckpoints = config.logDirs.map { logDir =>
     (logDir, new BrokerMetadataCheckpoint(new File(logDir + File.separator + brokerMetaPropsFile)))
@@ -223,7 +227,7 @@ class KafkaServer(
         _brokerState = BrokerState.STARTING
 
         /* setup zookeeper */
-        // mark 初始化zookeeper client 创建一些必要的路径
+        // mark 初始化zookeeper client 创建一些必要的持久节点
         initZkClient(time)
         // mark 这个也是一层业务包装 用于专门用来获取配置（调用config方法，用于获取zookeeper层级的如topic或者broker配置）
         configRepository = new ZkConfigRepository(new AdminZkClient(zkClient)) // 这个也是
