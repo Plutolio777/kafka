@@ -24,14 +24,11 @@ import java.util.Objects;
 import org.apache.kafka.common.utils.Utils;
 
 /**
- * Represents an immutable basic version range using 2 attributes: min and max, each of type short.
- * The min and max attributes need to satisfy 2 rules:
- *  - they are each expected to be >= 1, as we only consider positive version values to be valid.
- *  - max should be >= min.
- *
- * The class also provides API to convert the version range to a map.
- * The class allows for configurable labels for the min/max attributes, which can be specialized by
- * sub-classes (if needed).
+ * 表示一个不可变的基本版本范围，使用两个属性：min 和 max，类型均为 short。
+ * min 和 max 属性需要满足以下两个规则：
+ *  - 它们都应大于或等于 1，因为我们只认为正的版本值是有效的。
+ *  - max 应大于或等于 min。
+ *  该类还提供了一个将版本范围转换为映射（map）的 API。该类允许配置 min/max 属性的标签，这些标签可以由子类进行专门化（如果需要的话）。
  */
 class BaseVersionRange {
     // Non-empty label for the min version key, that's used only to convert to/from a map.
@@ -47,19 +44,20 @@ class BaseVersionRange {
     private final short maxValue;
 
     /**
-     * Raises an exception unless the following condition is met:
-     * minValue >= 1 and maxValue >= 1 and maxValue >= minValue.
+     * 除非满足以下条件，否则抛出异常：
+     * minValue >= 1 并且 maxValue >= 1 并且 maxValue >= minValue。
      *
-     * @param minKeyLabel   Label for the min version key, that's used only to convert to/from a map.
-     * @param minValue      The minimum version value.
-     * @param maxKeyLabel   Label for the max version key, that's used only to convert to/from a map.
-     * @param maxValue      The maximum version value.
+     * @param minKeyLabel   最小版本键的标签，仅用于从映射（map）中转换。
+     * @param minValue      最小版本值。
+     * @param maxKeyLabel   最大版本键的标签，仅用于从映射（map）中转换。
+     * @param maxValue      最大版本值。
      *
-     * @throws IllegalArgumentException   If any of the following conditions are true:
-     *                                     - (minValue < 1) OR (maxValue < 1) OR (maxValue < minValue).
-     *                                     - minKeyLabel is empty, OR, minKeyLabel is empty.
+     * @throws IllegalArgumentException   如果以下任一条件为真，则抛出异常：
+     *                                     - (minValue < 1) 或 (maxValue < 1) 或 (maxValue < minValue)。
+     *                                     - minKeyLabel 为空，或 minKeyLabel 为空。
      */
     protected BaseVersionRange(String minKeyLabel, short minValue, String maxKeyLabel, short maxValue) {
+        // mark 不满足条件抛出异常
         if (minValue < 1 || maxValue < 1 || maxValue < minValue) {
             throw new IllegalArgumentException(
                 String.format(

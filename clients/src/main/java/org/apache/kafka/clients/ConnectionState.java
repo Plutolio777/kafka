@@ -17,13 +17,12 @@
 package org.apache.kafka.clients;
 
 /**
- * The states of a node connection
- *
- * DISCONNECTED: connection has not been successfully established yet
- * CONNECTING: connection is under progress
- * CHECKING_API_VERSIONS: connection has been established and api versions check is in progress. Failure of this check will cause connection to close
- * READY: connection is ready to send requests
- * AUTHENTICATION_FAILED: connection failed due to an authentication error
+ * 节点连接的状态枚举值
+ * DISCONNECTED: 连接尚未成功建立
+ * CONNECTING: 连接正在进行中
+ * CHECKING_API_VERSIONS: 连接已建立，正在进行API版本检查。此检查失败将导致连接关闭
+ * READY: 连接已准备好发送请求
+ * AUTHENTICATION_FAILED: 由于认证错误连接失败
  */
 public enum ConnectionState {
     DISCONNECTED, CONNECTING, CHECKING_API_VERSIONS, READY, AUTHENTICATION_FAILED;

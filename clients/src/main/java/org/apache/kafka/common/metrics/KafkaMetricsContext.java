@@ -21,11 +21,11 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * A implementation of MetricsContext, it encapsulates required metrics context properties for Kafka services and clients
+ * MetricsContext 的实现，它封装了 Kafka 服务和客户端所需的指标上下文属性
  */
 public class KafkaMetricsContext implements MetricsContext {
     /**
-     * Client or Service's contextLabels map.
+     * 客户端或服务的 contextLabels 映射。
      */
     private final Map<String, String> contextLabels = new HashMap<>();
 

@@ -38,7 +38,7 @@ import static org.apache.kafka.common.protocol.types.Type.NULLABLE_BYTES;
 import static org.apache.kafka.common.protocol.types.Type.RECORDS;
 
 /**
- * Identifiers for all the Kafka APIs
+ * 所有 Kafka API 的标识符
  */
 public enum ApiKeys {
     PRODUCE(ApiMessageType.PRODUCE),
@@ -119,27 +119,31 @@ public enum ApiKeys {
         }
     }
 
-    // The generator ensures every `ApiMessageType` has a unique id
+    // mark API的ID到TYPE的映射
     private static final Map<Integer, ApiKeys> ID_TO_TYPE = Arrays.stream(ApiKeys.values())
         .collect(Collectors.toMap(key -> (int) key.id, Function.identity()));
 
-    /** the permanent and immutable id of an API - this can't change ever */
+    /**
+     * API 的永久且不可变的 id - 这永远不会改变
+     */
     public final short id;
 
-    /** An english description of the api - used for debugging and metric names, it can potentially be changed via a KIP */
+    /** api 的英文描述 - 用于调试和指标名称，它可以通过 KIP 进行更改 */
     public final String name;
 
-    /** indicates if this is a ClusterAction request used only by brokers */
+    /** 标志API是否只由集群操作发起 */
     public final boolean clusterAction;
 
-    /** indicates the minimum required inter broker magic required to support the API */
+    /** 表示支持 API 所需的最低经纪商间魔力 */
     public final byte minRequiredInterBrokerMagic;
 
-    /** indicates whether the API is enabled for forwarding **/
+    /** 是否开启API转发 **/
     public final boolean forwardable;
 
+    /** 是否需要延迟分配 **/
     public final boolean requiresDelayedAllocation;
 
+    // mark 更具体的API类型枚举类
     public final ApiMessageType messageType;
 
     ApiKeys(ApiMessageType messageType) {

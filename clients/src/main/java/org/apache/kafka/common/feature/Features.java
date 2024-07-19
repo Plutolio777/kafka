@@ -24,13 +24,12 @@ import java.util.Objects;
 import static java.util.stream.Collectors.joining;
 
 /**
- * Represents an immutable dictionary with key being feature name, and value being <VersionRangeType>.
- * Also provides API to convert the features and their version ranges to/from a map.
+ * 表示一个不可变的字典，其中键是feature名称，值是 <VersionRangeType>表示feature支持的最大最小版本。
+ * 同时提供了将功能及其版本范围转换为映射（map）的 API。
+ * 该类只能通过其工厂函数进行实例化，主要的工厂函数有：
+ * Features.supportedFeatures(...) 和 Features.finalizedFeatures(...)。
  *
- * This class can be instantiated only using its factory functions, with the important ones being:
- * Features.supportedFeatures(...) and Features.finalizedFeatures(...).
- *
- * @param <VersionRangeType> is the type of version range.
+ * @param <VersionRangeType> 是版本范围的类型。
  * @see SupportedVersionRange
  */
 public class Features<VersionRangeType extends BaseVersionRange> {

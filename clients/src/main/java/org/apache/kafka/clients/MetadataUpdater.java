@@ -28,32 +28,29 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * The interface used by `NetworkClient` to request cluster metadata info to be updated and to retrieve the cluster nodes
- * from such metadata. This is an internal class.
+ * NetworkClient 用于请求更新集群元数据信息并检索集群节点的接口
+ * 来自此类元数据。这是一个内部类。
  * <p>
- * This class is not thread-safe!
+ * 这个类不是线程安全的！
+ * 默认使用 {@link ManualMetadataUpdater}
+ * 还有一个默认实现 {@link NetworkClient.DefaultMetadataUpdater}
  */
 public interface MetadataUpdater extends Closeable {
 
     /**
-     * Gets the current cluster info without blocking.
+     * 无阻塞获取当前集群信息。
      */
     List<Node> fetchNodes();
 
     /**
-     * Returns true if an update to the cluster metadata info is due.
+     * 如果集群元数据信息更新到期，则返回 true。
      */
     boolean isUpdateDue(long now);
 
     /**
-     * Starts a cluster metadata update if needed and possible. Returns the time until the metadata update (which would
-     * be 0 if an update has been started as a result of this call).
-     *
-     * If the implementation relies on `NetworkClient` to send requests, `handleSuccessfulResponse` will be
-     * invoked after the metadata response is received.
-     *
-     * The semantics of `needed` and `possible` are implementation-dependent and may take into account a number of
-     * factors like node availability, how long since the last metadata update, etc.
+     * 如果需要且可能，启动一个集群元数据更新。返回直到元数据更新的时间（如果启动了更新，则时间为 0）。
+     * 如果实现依赖于 `NetworkClient` 来发送请求，`handleSuccessfulResponse` 方法将在接收到元数据响应后被调用。
+     * `needed` 和 `possible` 的语义依赖于具体的实现，可能会考虑多种因素，如节点可用性、距离上次元数据更新的时间等。
      */
     long maybeUpdate(long now);
 

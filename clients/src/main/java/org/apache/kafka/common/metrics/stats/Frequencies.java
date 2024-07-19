@@ -27,20 +27,15 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * A {@link CompoundStat} that represents a normalized distribution with a {@link Frequency} metric for each
- * bucketed value. The values of the {@link Frequency} metrics specify the frequency of the center value appearing
- * relative to the total number of values recorded.
+ * 表示带有每个分桶值的 {@link Frequency} 指标的标准化分布的 {@link CompoundStat}。{@link Frequency} 指标的值指定中心值出现的频率与记录的总数之间的关系。
  * <p>
- * For example, consider a component that records failure or success of an operation using boolean values, with
- * one metric to capture the percentage of operations that failed another to capture the percentage of operations
- * that succeeded.
+ * 例如，考虑一个组件使用布尔值记录操作的成功或失败，其中一个指标用于捕获失败操作的百分比，另一个用于捕获成功操作的百分比。
  * <p>
- * This can be accomplish by created a {@link org.apache.kafka.common.metrics.Sensor Sensor} to record the values,
- * with 0.0 for false and 1.0 for true. Then, create a single {@link Frequencies} object that has two
- * {@link Frequency} metrics: one centered around 0.0 and another centered around 1.0. The {@link Frequencies}
- * object is a {@link CompoundStat}, and so it can be {@link org.apache.kafka.common.metrics.Sensor#add(CompoundStat)
- * added directly to a Sensor} so the metrics are created automatically.
+ * 可以通过创建一个 {@link org.apache.kafka.common.metrics.Sensor Sensor} 来记录这些值，使用 0.0 表示 false，1.0 表示 true。
+ * 然后，创建一个 {@link Frequencies} 对象，其中包含两个 {@link Frequency} 指标：一个以 0.0 为中心，另一个以 1.0 为中心。
+ * {@link Frequencies} 对象是一个 {@link CompoundStat}，因此可以直接 {@link org.apache.kafka.common.metrics.Sensor#add(CompoundStat) 添加到传感器}，从而自动创建这些指标。
  */
+@SuppressWarnings("ClassEscapesDefinedScope")
 public class Frequencies extends SampledStat implements CompoundStat {
 
     /**

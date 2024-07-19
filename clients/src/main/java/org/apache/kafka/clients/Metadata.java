@@ -123,12 +123,12 @@ public class Metadata implements Closeable {
     }
 
     /**
-     * The next time to update the cluster info is the maximum of the time the current info will expire and the time the
-     * current info can be updated (i.e. backoff time has elapsed); If an update has been request then the expiry time
-     * is now
+     * 下次更新集群信息的时间是当前信息过期的时间和集群信息过期的时间中的最大值
+     * 当前信息可以更新（即退避时间已过）；如果已请求更新，则到期时间
+     * 就是现在
      *
-     * @param nowMs current time in ms
-     * @return remaining time in ms till updating the cluster info
+     * @param nowMs 当前时间（以毫秒为单位）
+     * @return 更新集群信息之前的剩余时间（以毫秒为单位）
      */
     public synchronized long timeToNextUpdate(long nowMs) {
         long timeToExpire = updateRequested() ? 0 : Math.max(this.lastSuccessfulRefreshMs + this.metadataExpireMs - nowMs, 0);

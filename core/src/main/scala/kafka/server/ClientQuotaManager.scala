@@ -153,32 +153,29 @@ object ClientQuotaManager {
 }
 
 /**
- * Helper class that records per-client metrics. It is also responsible for maintaining Quota usage statistics
- * for all clients.
+ * 辅助类，记录每个客户端的指标，并管理所有客户端的配额使用统计。
  * <p/>
- * Quotas can be set at <user, client-id>, user or client-id levels. For a given client connection,
- * the most specific quota matching the connection will be applied. For example, if both a <user, client-id>
- * and a user quota match a connection, the <user, client-id> quota will be used. Otherwise, user quota takes
- * precedence over client-id quota. The order of precedence is:
+ * 配额可以在 <user, client-id>、user 或 client-id 级别进行设置。对于给定的客户端连接，
+ * 将应用与连接最匹配的最具体的配额。例如，如果同时存在 <user, client-id> 配额和 user 配额匹配某个连接，
+ * 则将使用 <user, client-id> 配额。否则，user 配额优先于 client-id 配额。优先级顺序如下：
  * <ul>
- *   <li>/config/users/<user>/clients/<client-id>
- *   <li>/config/users/<user>/clients/<default>
- *   <li>/config/users/<user>
- *   <li>/config/users/<default>/clients/<client-id>
- *   <li>/config/users/<default>/clients/<default>
- *   <li>/config/users/<default>
- *   <li>/config/clients/<client-id>
- *   <li>/config/clients/<default>
+ * <li>/config/users/<user>/clients/<client-id></li>
+ * <li>/config/users/<user>/clients/<default></li>
+ * <li>/config/users/<user></li>
+ * <li>/config/users/<default>/clients/<client-id></li>
+ * <li>/config/users/<default>/clients/<default></li>
+ * <li>/config/users/<default></li>
+ * <li>/config/clients/<client-id></li>
+ * <li>/config/clients/<default></li>
  * </ul>
- * Quota limits including defaults may be updated dynamically. The implementation is optimized for the case
- * where a single level of quotas is configured.
+ * 配额限制，包括默认值，可以动态更新。该实现针对配置了单层配额的情况进行了优化。
  *
- * @param config @ClientQuotaManagerConfig quota configs
- * @param metrics @Metrics Metrics instance
- * @param quotaType Quota type of this quota manager
- * @param time @Time object to use
- * @param threadNamePrefix The thread prefix to use
- * @param clientQuotaCallback An optional @ClientQuotaCallback
+ * @param config              ClientQuotaManagerConfig 对象，用于配置配额
+ * @param metrics             Metrics 对象，用于记录指标
+ * @param quotaType           该配额管理器管理的配额类型
+ * @param time                Time 对象，用于时间相关操作
+ * @param threadNamePrefix    线程名前缀，用于线程命名
+ * @param clientQuotaCallback 可选的 ClientQuotaCallback 回调对象，用于客户端配额管理
  */
 class ClientQuotaManager(private val config: ClientQuotaManagerConfig,
                          private val metrics: Metrics,
@@ -199,6 +196,7 @@ class ClientQuotaManager(private val config: ClientQuotaManagerConfig,
   }
 
   private val delayQueueSensor = metrics.sensor(quotaType.toString + "-delayQueue")
+
   delayQueueSensor.add(metrics.metricName("queue-size", quotaType.toString,
     "Tracks the size of the delay queue"), new CumulativeSum())
 

@@ -36,9 +36,8 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
- * This class encapsulates the default yammer metrics registry for Kafka server,
- * and configures the set of exported JMX metrics for Yammer metrics.
- * KafkaYammerMetrics.defaultRegistry() should always be used instead of Metrics.defaultRegistry()
+ * 这个类封装了 Kafka 服务器的默认 Yammer 指标注册表，并配置了导出到 JMX 的 Yammer 指标集合。
+ * 应始终使用 KafkaYammerMetrics.defaultRegistry() 而不是 Metrics.defaultRegistry()。
  */
 public class KafkaYammerMetrics implements Reconfigurable {
 

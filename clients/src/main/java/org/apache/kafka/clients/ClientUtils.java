@@ -126,20 +126,36 @@ public final class ClientUtils {
                 clientSaslMechanism, time, true, logContext);
     }
 
+    /**
+     * 解析给定主机名或IP地址，返回一系列的 InetAddress 对象。
+     * 此方法首先使用提供的 HostResolver 实例解析主机名，然后过滤出首选的地址。
+     * 它主要适用于需要根据特定策略或优先级选择 InetAddress 的场景。
+     *
+     * @param host         要解析的主机名或IP地址。
+     * @param hostResolver 用于实际解析主机的实例，允许自定义解析逻辑。
+     * @return 包含解析出的 InetAddress 对象的列表，根据首选项进行过滤。
+     * @throws UnknownHostException 如果无法解析主机名。
+     */
     static List<InetAddress> resolve(String host, HostResolver hostResolver) throws UnknownHostException {
+        // mark 使用hostResolver解析提供的host，获取所有可用的InetAddress对象
         InetAddress[] addresses = hostResolver.resolve(host);
+        // mark 过滤并返回InetAddress列表
         List<InetAddress> result = filterPreferredAddresses(addresses);
-        if (log.isDebugEnabled())
+        // mark 如果日志级别允许，记录解析结果
+        if (log.isDebugEnabled()) {
             log.debug("Resolved host {} as {}", host, result.stream().map(i -> i.getHostAddress()).collect(Collectors.joining(",")));
+        }
+        // 返回过滤后的InetAddress列表
         return result;
     }
 
+
     /**
-     * Return a list containing the first address in `allAddresses` and subsequent addresses
-     * that are a subtype of the first address.
-     *
-     * The outcome is that all returned addresses are either IPv4 or IPv6 (InetAddress has two
-     * subclasses: Inet4Address and Inet6Address).
+     * 这个方法是统一ip地址类型的
+     * 返回包含`allAddresses`中的第一个地址和后续地址   的列表
+     * 这是第一个地址的子类型。
+     * 结果是所有返回的地址都是 IPv4 或 IPv6（InetAddress 有两个
+     * 子类：Inet4Address 和 Inet6Address）。
      */
     static List<InetAddress> filterPreferredAddresses(InetAddress[] allAddresses) {
         List<InetAddress> preferredAddresses = new ArrayList<>();

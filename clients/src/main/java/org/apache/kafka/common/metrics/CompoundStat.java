@@ -21,8 +21,7 @@ import org.apache.kafka.common.MetricName;
 import java.util.List;
 
 /**
- * A compound stat is a stat where a single measurement and associated data structure feeds many metrics. This is the
- * example for a histogram which has many associated percentiles.
+ * 复合统计信息是一种统计，其中单个测量和相关数据结构提供给多个指标使用。例如，直方图就有许多相关的百分位数。
  */
 public interface CompoundStat extends Stat {
 

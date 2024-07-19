@@ -24,7 +24,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * An interface for asynchronous, multi-channel network I/O
+ * 用于异步、多通道网络 I/O 的接口
  */
 public interface Selectable {
 
@@ -34,33 +34,33 @@ public interface Selectable {
     int USE_DEFAULT_BUFFER_SIZE = -1;
 
     /**
-     * Begin establishing a socket connection to the given address identified by the given address
-     * @param id The id for this connection
-     * @param address The address to connect to
-     * @param sendBufferSize The send buffer for the socket
-     * @param receiveBufferSize The receive buffer for the socket
-     * @throws IOException If we cannot begin connecting
+     * 开始建立到指定地址的套接字连接。
+     * @param id 这个连接的ID
+     * @param address 要连接的地址
+     * @param sendBufferSize 套接字的发送缓冲区大小
+     * @param receiveBufferSize 套接字的接收缓冲区大小
+     * @throws IOException 如果无法开始连接
      */
     void connect(String id, InetSocketAddress address, int sendBufferSize, int receiveBufferSize) throws IOException;
 
     /**
-     * Wakeup this selector if it is blocked on I/O
+     * 如果该选择器在 I/O 上被阻止，则唤醒该选择器
      */
     void wakeup();
 
     /**
-     * Close this selector
+     * 关闭此选择器
      */
     void close();
 
     /**
-     * Close the connection identified by the given id
+     * 关闭由给定 id 标识的连接
      */
     void close(String id);
 
     /**
-     * Queue the given request for sending in the subsequent {@link #poll(long) poll()} calls
-     * @param send The request to send
+     * 将给定的请求排队，以便在随后的 {@link #poll(long) poll()} 调用中发送
+     * @param send 要发送的请求
      */
     void send(NetworkSend send);
 

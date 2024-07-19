@@ -92,6 +92,7 @@ object KafkaServer {
  * Represents the lifecycle of a single Kafka broker. Handles all functionality required
  * to start up and shutdown a single Kafka node.
  */
+//noinspection DuplicatedCode
 class KafkaServer(
   val config: KafkaConfig,
   time: Time = Time.SYSTEM,
@@ -183,6 +184,7 @@ class KafkaServer(
 
   private var _featureChangeListener: FinalizedFeatureChangeListener = _
 
+  // mark 用于存储Broker的版本特性
   val brokerFeatures: BrokerFeatures = BrokerFeatures.createEmpty()
 
   override def brokerState: BrokerState = _brokerState
@@ -230,7 +232,7 @@ class KafkaServer(
         // mark 初始化zookeeper client 创建一些必要的持久节点
         initZkClient(time)
         // mark 这个也是一层业务包装 用于专门用来获取配置（调用config方法，用于获取zookeeper层级的如topic或者broker配置）
-        configRepository = new ZkConfigRepository(new AdminZkClient(zkClient)) // 这个也是
+        configRepository = new ZkConfigRepository(new AdminZkClient(zkClient))
 
         /* Get or create cluster_id */
         // mark 获取(如果已经存在)或者生成集群ID（uuid的base64编码）
@@ -265,7 +267,7 @@ class KafkaServer(
         logContext = new LogContext(s"[KafkaServer id=${config.brokerId}] ")
         this.logIdent = logContext.logPrefix
 
-        // mark kafka利用zookeeper实现运行过程中修改配置
+        // mark kafka利用zookeeper实现运行过程中动态修改配置
         // initialize dynamic broker configs from ZooKeeper. Any updates made after this will be
         // applied after ZkConfigManager starts.
         config.dynamicConfig.initialize(Some(zkClient))
@@ -279,12 +281,15 @@ class KafkaServer(
         // mark 创建及配置监控，默认使用JMX及Yammer Metrics
         kafkaYammerMetrics = KafkaYammerMetrics.INSTANCE
         kafkaYammerMetrics.configure(config.originals)
+
+        // mark 初始化指标注册表
         metrics = Server.initializeMetrics(config, time, clusterId)
 
         /* register broker metrics */
         // mark 用于保存 BrokerTopicMetrics
         _brokerTopicStats = new BrokerTopicStats
 
+        // mark kafka配额管理器 负责kafka流量控制
         quotaManagers = QuotaFactory.instantiate(config, metrics, time, threadNamePrefix.getOrElse(""))
         KafkaBroker.notifyClusterListeners(clusterId, kafkaMetricsReporters ++ metrics.reporters.asScala)
 
@@ -306,22 +311,29 @@ class KafkaServer(
         // mark 启动管理器 (zkClient.getAllTopicsInCluster方法会获取所有的topic名称）
         logManager.startup(zkClient.getAllTopicsInCluster())
 
+        // mark 从zookeeper迁移到kraft
         if (config.migrationEnabled) {
           kraftControllerNodes = RaftConfig.voterConnectionsToNodes(
             RaftConfig.parseVoterConnections(config.quorumVoters)).asScala
         } else {
           kraftControllerNodes = Seq.empty
         }
+
+        // mark kafka集群元数据的缓存（目前是空的快照里面啥都没有）
         metadataCache = MetadataCache.zkMetadataCache(
           config.brokerId,
           config.interBrokerProtocolVersion,
           brokerFeatures,
           kraftControllerNodes)
+
+        // mark 用于获取controller节点中的数据（zk和kraft实现）
         val controllerNodeProvider = new MetadataCacheControllerNodeProvider(metadataCache, config)
 
         /* initialize feature change listener */
+        // mark feature变化监听器
         _featureChangeListener = new FinalizedFeatureChangeListener(metadataCache, _zkClient)
         if (config.isFeatureVersioningSupported) {
+          // mark 初始话监听器 并完成第一次更新
           _featureChangeListener.initOrThrow(config.zkConnectionTimeoutMs)
         }
 
@@ -330,13 +342,21 @@ class KafkaServer(
         tokenCache = new DelegationTokenCache(ScramMechanism.mechanismNames)
         credentialProvider = new CredentialProvider(ScramMechanism.mechanismNames, tokenCache)
 
+        // mark Broker到控制器的通道管理器
         clientToControllerChannelManager = BrokerToControllerChannelManager(
+          // mark 控制节点信息获取器
           controllerNodeProvider = controllerNodeProvider,
+          // mark 时间工具
           time = time,
+          // mark 指标集合
           metrics = metrics,
+          // mark kafka配置
           config = config,
+          // mark 通道名称
           channelName = "forwarding",
+          // mark 线程名称前缀
           threadNamePrefix = threadNamePrefix,
+          // mark 重试超时时间
           retryTimeoutMs = config.requestTimeoutMs.longValue
         )
         clientToControllerChannelManager.start()

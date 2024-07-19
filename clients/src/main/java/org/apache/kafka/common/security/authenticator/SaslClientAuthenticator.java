@@ -130,7 +130,7 @@ public class SaslClientAuthenticator implements Authenticator {
     public static final int MIN_RESERVED_CORRELATION_ID = MAX_RESERVED_CORRELATION_ID - 7;
 
     /**
-     * @return true if the correlation id is reserved for SASL request. otherwise, false
+     * @return true 如果关联 ID 是为 SASL 请求保留的。否则为假
      */
     public static boolean isReserved(int correlationId) {
         return correlationId >= MIN_RESERVED_CORRELATION_ID;

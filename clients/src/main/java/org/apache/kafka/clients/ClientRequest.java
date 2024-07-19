@@ -22,17 +22,25 @@ import org.apache.kafka.common.requests.AbstractRequest;
 import org.apache.kafka.common.requests.RequestHeader;
 
 /**
- * A request being sent to the server. This holds both the network send as well as the client-level metadata.
+ * 正在向服务器发送请求。它保存网络发送以及客户端级元数据。
  */
 public final class ClientRequest {
 
+    // mark 请求发送目的地址字符串
     private final String destination;
+    // mark 请求体构建器
     private final AbstractRequest.Builder<?> requestBuilder;
+    // mark 关联id
     private final int correlationId;
+    // mark 客户端id
     private final String clientId;
+    // mark 请求创建时间戳
     private final long createdTimeMs;
+    // mark 是否需要响应
     private final boolean expectResponse;
+    // mark 请求超时时间
     private final int requestTimeoutMs;
+    // mark 请求完成回调处理器
     private final RequestCompletionHandler callback;
 
     /**
@@ -52,6 +60,7 @@ public final class ClientRequest {
                          boolean expectResponse,
                          int requestTimeoutMs,
                          RequestCompletionHandler callback) {
+        // mark 只是赋值没啥逻辑
         this.destination = destination;
         this.requestBuilder = requestBuilder;
         this.correlationId = correlationId;

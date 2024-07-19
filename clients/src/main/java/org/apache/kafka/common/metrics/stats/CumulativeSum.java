@@ -20,10 +20,9 @@ import org.apache.kafka.common.metrics.MeasurableStat;
 import org.apache.kafka.common.metrics.MetricConfig;
 
 /**
- * An non-sampled cumulative total maintained over all time.
- * This is a non-sampled version of {@link WindowedSum}.
- *
- * See also {@link CumulativeCount} if you just want to increment the value by 1 on each recording.
+ * 在所有时间段内保持的非采样累计总数。
+ * 这是 {@link WindowedSum} 的非采样版本。
+ * 如果您只想在每次记录时将值增加1，请参见 {@link CumulativeCount}。
  */
 public class CumulativeSum implements MeasurableStat {
 
@@ -37,6 +36,14 @@ public class CumulativeSum implements MeasurableStat {
         total = value;
     }
 
+
+    /**
+     * 重写了record方法没有使用采样 只是简单记录了一下累加值
+     *
+     * @param config 指标配置（在此实现中未使用）
+     * @param value  要记录的值
+     * @param now    当前的时间戳（毫秒）
+     */
     @Override
     public void record(MetricConfig config, double value, long now) {
         total += value;

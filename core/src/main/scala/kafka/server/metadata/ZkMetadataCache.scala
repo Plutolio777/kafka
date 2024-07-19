@@ -57,7 +57,7 @@ trait ZkFinalizedFeatureCache {
 }
 
 /**
- *  A cache for the state (e.g., current leader) of each partition. This cache is updated through
+ * 每个分区的状态（例如当前领导者）的缓存。该缓存通过以下方式更新
  *  UpdateMetadataRequest from the controller. Every broker maintains the same cache, asynchronously.
  */
 class ZkMetadataCache(
@@ -67,26 +67,35 @@ class ZkMetadataCache(
   kraftControllerNodes: Seq[Node] = Seq.empty)
   extends MetadataCache with ZkFinalizedFeatureCache with Logging {
 
+  // mark 分区元数据读写锁
   private val partitionMetadataLock = new ReentrantReadWriteLock()
   //this is the cache state. every MetadataSnapshot instance is immutable, and updates (performed under a lock)
   //replace the value with a completely new one. this means reads (which are not under any lock) need to grab
   //the value of this var (into a val) ONCE and retain that read copy for the duration of their operation.
   //multiple reads of this value risk getting different snapshots.
+  // mark 元数据快照（初始创建为空）
   @volatile private var metadataSnapshot: MetadataSnapshot = MetadataSnapshot(
+    // mark 分区状态
     partitionStates = mutable.AnyRefMap.empty,
+    // mark topic
     topicIds = Map.empty,
+    // mark 控制节点ID
     controllerId = None,
+    // mark 存活的Broker信息
     aliveBrokers = mutable.LongMap.empty,
+    // mark 存活的节点信息
     aliveNodes = mutable.LongMap.empty)
 
   this.logIdent = s"[MetadataCache brokerId=$brokerId] "
   private val stateChangeLogger = new StateChangeLogger(brokerId, inControllerContext = false, None)
 
   // Features are updated via ZK notification (see FinalizedFeatureChangeListener)
+  // mark 保存Broker特性以及 epoch
   @volatile private var featuresAndEpoch: Option[FinalizedFeaturesAndEpoch] = Option.empty
   private val featureLock = new ReentrantLock()
   private val featureCond = featureLock.newCondition()
 
+  // mark kraft节点缓存
   private val kraftControllerNodeMap = kraftControllerNodes.map(node => node.id() -> node).toMap
 
   // This method is the main hotspot when it comes to the performance of metadata requests,
@@ -257,12 +266,27 @@ class ZkMetadataCache(
     metadataSnapshot.aliveBrokers.values.map(b => new BrokerMetadata(b.id, b.rack))
   }
 
+  /**
+   * mark 根据brokerId和listenerName获取存活的Broker节点。
+   *
+   * 此方法用于从当前的元数据快照中查找指定brokerId对应的存活Broker节点。如果brokerId对应的是KRaft协议控制器，
+   * 则从kraftControllerNodeMap中获取节点；否则，从aliveBrokers中获取节点。
+   *
+   * @param brokerId     Broker的ID
+   * @param listenerName 监听器名称，用于获取节点的具体连接信息
+   * @return 如果找到存活的Broker节点，则返回Some(Node)；否则返回None
+   */
   override def getAliveBrokerNode(brokerId: Int, listenerName: ListenerName): Option[Node] = {
+    // 获取当前的元数据快照
     val snapshot = metadataSnapshot
     brokerId match {
+      // mark 检查brokerId是否对应于KRaft协议控制器
       case id if snapshot.controllerId.filter(_.isInstanceOf[KRaftCachedControllerId]).exists(_.id == id) =>
+        // 如果是，从kraftControllerNodeMap中获取对应的节点
         kraftControllerNodeMap.get(id)
-      case _ => snapshot.aliveBrokers.get(brokerId).flatMap(_.getNode(listenerName))
+      case _ =>
+        // 如果不是控制器，从aliveBrokers中尝试获取对应的存活Broker节点
+        snapshot.aliveBrokers.get(brokerId).flatMap(_.getNode(listenerName))
     }
   }
 
@@ -496,27 +520,29 @@ class ZkMetadataCache(
   }
 
   /**
-   * Updates the cache to the latestFeatures, and updates the existing epoch to latestEpoch.
-   * Expects that the latestEpoch should be always greater than the existing epoch (when the
-   * existing epoch is defined).
+   * mark 将缓存更新为最新的特性，并将现有的 epoch 更新为最新的 epoch。
+   * 预期最新的 epoch 总是大于现有的 epoch（当现有的 epoch 已定义时）。
    *
-   * @param latestFeatures   the latest finalized features to be set in the cache
-   * @param latestEpoch      the latest epoch value to be set in the cache
-   *
-   * @throws                 FeatureCacheUpdateException if the cache update operation fails
-   *                         due to invalid parameters or incompatibilities with the broker's
-   *                         supported features. In such a case, the existing cache contents are
-   *                         not modified.
+   * @param latestFeatures 要设置在缓存中的最新最终特性
+   * @param latestEpoch    要设置在缓存中的最新 epoch 值
+   * @throws FeatureCacheUpdateException 如果由于无效参数或与代理支持的特性不兼容而导致缓存更新操作失败，
+   *                                     则抛出此异常。在这种情况下，不会修改现有的缓存内容。
    */
   def updateFeaturesOrThrow(latestFeatures: Map[String, Short], latestEpoch: Long): Unit = {
+    // mark 最新的feature
     val latest = FinalizedFeaturesAndEpoch(latestFeatures, latestEpoch)
-    val existing = featuresAndEpoch.map(item => item.toString()).getOrElse("<empty>")
+    // mark 判断当前是否存在feature
+    val existing = featuresAndEpoch.map(_.toString()).getOrElse("<empty>")
+
+    // mark 检查现有的 epoch 是否大于最新的 epoch 如果现有的比入参还大就不更新 抛出异常
     if (featuresAndEpoch.isDefined && featuresAndEpoch.get.epoch > latest.epoch) {
       val errorMsg = s"FinalizedFeatureCache update failed due to invalid epoch in new $latest." +
         s" The existing cache contents are $existing."
       throw new FeatureCacheUpdateException(errorMsg)
     } else {
+      // mark 检查集群的feature与代理Broker支持的feature是否存在不兼容
       val incompatibleFeatures = brokerFeatures.incompatibleFeatures(latest.features)
+      // mark 存在不兼容feature则抛出异常
       if (incompatibleFeatures.nonEmpty) {
         val errorMsg = "FinalizedFeatureCache update failed since feature compatibility" +
           s" checks failed! Supported ${brokerFeatures.supportedFeatures} has incompatibilities" +
@@ -524,6 +550,7 @@ class ZkMetadataCache(
         throw new FeatureCacheUpdateException(errorMsg)
       } else {
         val logMsg = s"Updated cache from existing $existing to latest $latest."
+        // mark 安全的更新缓存中的特性
         inLock(featureLock) {
           featuresAndEpoch = Some(latest)
           featureCond.signalAll()
@@ -535,14 +562,17 @@ class ZkMetadataCache(
 
 
   /**
-   * Clears all existing finalized features and epoch from the cache.
+   * mark 清除缓存中feature
+   *
+   * 此方法用于重置缓存中的特征信息和相关周期数据，确保缓存状态干净。
    */
   def clearFeatures(): Unit = {
     inLock(featureLock) {
-      featuresAndEpoch = None
-      featureCond.signalAll()
+      featuresAndEpoch = None // 清空特征和周期数据
+      featureCond.signalAll() // 唤醒所有等待在特征条件上的线程
     }
   }
+
 
   /**
    * Waits no more than timeoutMs for the cache's feature epoch to reach an epoch >= minExpectedEpoch.

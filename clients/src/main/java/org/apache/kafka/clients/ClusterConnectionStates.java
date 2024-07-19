@@ -33,25 +33,30 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The state of our connection to each node in the cluster.
- *
+ * 我们与集群中每个节点的连接状态。
  */
 final class ClusterConnectionStates {
     final static int RECONNECT_BACKOFF_EXP_BASE = 2;
     final static double RECONNECT_BACKOFF_JITTER = 0.2;
     final static int CONNECTION_SETUP_TIMEOUT_EXP_BASE = 2;
     final static double CONNECTION_SETUP_TIMEOUT_JITTER = 0.2;
+    // mark 连接状态缓存
     private final Map<String, NodeConnectionState> nodeState;
     private final Logger log;
+    // mark 域名解析器
     private final HostResolver hostResolver;
+    // mark 用来保存正在连接的节点ID
     private Set<String> connectingNodes;
+    // mark 连接失败后等待重连的时间
     private ExponentialBackoff reconnectBackoff;
+    // mark 建立连接的超时时间
     private ExponentialBackoff connectionSetupTimeout;
 
     public ClusterConnectionStates(long reconnectBackoffMs, long reconnectBackoffMaxMs,
                                    long connectionSetupTimeoutMs, long connectionSetupTimeoutMaxMs,
                                    LogContext logContext, HostResolver hostResolver) {
         this.log = logContext.logger(ClusterConnectionStates.class);
+        // mark 这个两个玩意是相当于控制重连或者超时的时间范围 如果重连按照一个频率进行的话会有问题
         this.reconnectBackoff = new ExponentialBackoff(
                 reconnectBackoffMs,
                 RECONNECT_BACKOFF_EXP_BASE,
@@ -62,6 +67,7 @@ final class ClusterConnectionStates {
                 CONNECTION_SETUP_TIMEOUT_EXP_BASE,
                 connectionSetupTimeoutMaxMs,
                 CONNECTION_SETUP_TIMEOUT_JITTER);
+
         this.nodeState = new HashMap<>();
         this.connectingNodes = new HashSet<>();
         this.hostResolver = hostResolver;
@@ -77,8 +83,10 @@ final class ClusterConnectionStates {
     public boolean canConnect(String id, long now) {
         NodeConnectionState state = nodeState.get(id);
         if (state == null)
+            // mark 如果没有保存这个节点的连接状态则直接返回true
             return true;
         else
+            // mark 如果节点时区连接 并且上次连接时间间隔已经大于重连延时则可以重新连接
             return state.state.isDisconnected() &&
                    now - state.lastConnectAttemptMs >= state.reconnectBackoffMs;
     }
@@ -139,26 +147,30 @@ final class ClusterConnectionStates {
     }
 
     /**
-     * Enter the connecting state for the given connection, moving to a new resolved address if necessary.
-     * @param id the id of the connection
-     * @param now the current time in ms
-     * @param host the host of the connection, to be resolved internally if needed
+     * 将给定的节点标记为正在连接中，如有必要，移动到新的解析地址。
+     * @param id 连接的id
+     * @param now 当前时间（以毫秒为单位）
+     * @param host 连接的主机，如果需要则在内部解析
      */
     public void connecting(String id, long now, String host) {
+        // mark 尝试从节点状态缓存中获取连接状态
         NodeConnectionState connectionState = nodeState.get(id);
+        // mark 如果链接状态的域名和已存在状态域名相同 则直接更新连接状态信息
         if (connectionState != null && connectionState.host().equals(host)) {
             connectionState.lastConnectAttemptMs = now;
+            // mark 标记为正在连接中
             connectionState.state = ConnectionState.CONNECTING;
-            // Move to next resolved address, or if addresses are exhausted, mark node to be re-resolved
+            // mark 移动到下一个解析的地址，或者如果地址耗尽，则标记要重新解析的节点
             connectionState.moveToNextAddress();
+            // mark 添加到连接中节点集合中（只添加了个ID）
             connectingNodes.add(id);
             return;
         } else if (connectionState != null) {
             log.info("Hostname for node {} changed from {} to {}.", id, connectionState.host(), host);
         }
 
-        // Create a new NodeConnectionState if nodeState does not already contain one
-        // for the specified id or if the hostname associated with the node id changed.
+        // mark 如果 nodeState 尚不包含，则创建一个新的 NodeConnectionState
+        // mark 添加节点状态到注册表中
         nodeState.put(id, new NodeConnectionState(ConnectionState.CONNECTING, now,
                 reconnectBackoff.backoff(0), connectionSetupTimeout.backoff(0), host, hostResolver));
         connectingNodes.add(id);
@@ -174,25 +186,34 @@ final class ClusterConnectionStates {
     }
 
     /**
-     * Enter the disconnected state for the given node.
-     * @param id the connection we have disconnected
-     * @param now the current time in ms
+     * 使指定节点进入断开连接状态。
+     * @param id 断开连接的连接ID
+     * @param now 当前时间（以毫秒为单位）
      */
     public void disconnected(String id, long now) {
+        // mark 先从缓存中尝试获取现有的连接状态
         NodeConnectionState nodeState = nodeState(id);
+        // mark 记录一下节点的的上一次尝试连接时间
         nodeState.lastConnectAttemptMs = now;
+        // mark 更新节点的退避重连时间
         updateReconnectBackoff(nodeState);
+        // mark 如果节点状态当前的状态为连接中(连接中失败 需要重算重试时间)
         if (nodeState.state == ConnectionState.CONNECTING) {
+            // mark 重新计算时间间隔
             updateConnectionSetupTimeout(nodeState);
+            // mark 从正在连接节点列表中移除
             connectingNodes.remove(id);
         } else {
+            // mark 重置重连时间
             resetConnectionSetupTimeout(nodeState);
+            // mark 如果是已经建立好连接的节点 还需要清空地址
             if (nodeState.state.isConnected()) {
-                // If a connection had previously been established, clear the addresses to trigger a new DNS resolution
-                // because the node IPs may have changed
+                // mark 如果之前已建立连接，则清除地址以触发新的 DNS 解析
+                // mark 因为节点IP可能已经改变
                 nodeState.clearAddresses();
             }
         }
+        // mark 连接状态标记为连接失败
         nodeState.state = ConnectionState.DISCONNECTED;
     }
 
@@ -278,10 +299,10 @@ final class ClusterConnectionStates {
     }
 
     /**
-     * Return true if the connection is in the READY state and currently not throttled.
+     * 如果连接处于 READY 状态且当前未受到限制，则返回 true。
      *
-     * @param id the connection identifier
-     * @param now the current time in ms
+     * @param id 连接标识符
+     * @param now 当前时间（以毫秒为单位）
      */
     public boolean isReady(String id, long now) {
         return isReady(nodeState.get(id), now);
@@ -356,12 +377,11 @@ final class ClusterConnectionStates {
     }
 
     /**
-     * Increment the failure counter, update the node reconnect backoff exponentially,
-     * and record the current timestamp.
-     * The delay is reconnect.backoff.ms * 2**(failures - 1) * (+/- 20% random jitter)
-     * Up to a (pre-jitter) maximum of reconnect.backoff.max.ms
+     * 增加失败计数器，按指数方式更新节点重连的退避时间，并记录当前时间戳。
+     * 延迟时间为 reconnect.backoff.ms * 2**(failures - 1) * (+/- 20% 随机抖动)
+     * 最大延迟时间（抖动前）为 reconnect.backoff.max.ms
      *
-     * @param nodeState The node state object to update
+     * @param nodeState 要更新的节点状态对象
      */
     private void updateReconnectBackoff(NodeConnectionState nodeState) {
         nodeState.reconnectBackoffMs = reconnectBackoff.backoff(nodeState.failedAttempts);
@@ -376,7 +396,9 @@ final class ClusterConnectionStates {
      * @param nodeState The node state object to update
      */
     private void updateConnectionSetupTimeout(NodeConnectionState nodeState) {
+        // mark 更新建立连接失败次数
         nodeState.failedConnectAttempts++;
+        // mark 重新生成节点连接超时时间（指数退避算法生成重连超时时间间隔）
         nodeState.connectionSetupTimeoutMs = connectionSetupTimeout.backoff(nodeState.failedConnectAttempts);
     }
 
@@ -462,22 +484,33 @@ final class ClusterConnectionStates {
     }
 
     /**
-     * The state of our connection to a node.
+     * 节点的连接状态抽象。
      */
     private static class NodeConnectionState {
 
+        // mark 节点的连接诶状态
         ConnectionState state;
+        // mark 记录认证失败异常
         AuthenticationException authenticationException;
+        // mark 上次尝试连接时间节点
         long lastConnectAttemptMs;
+        // mark 期望的连接超时时间
         long failedAttempts;
+        // mark 连接失败次数
         long failedConnectAttempts;
+        // mark 期望的重连补偿时间
         long reconnectBackoffMs;
+        // mark 建立连接超时时间
         long connectionSetupTimeoutMs;
-        // Connection is being throttled if current time < throttleUntilTimeMs.
+        // mark 如果当前时间 < throttleUntilTimeMs，则连接将受到限制。
         long throttleUntilTimeMs;
+        // mark 节点的连接地址
         private List<InetAddress> addresses;
+        // mark 节点地址集合索引指针
         private int addressIndex;
+        // mark 节点域名
         private final String host;
+        // mark 域名解析器
         private final HostResolver hostResolver;
 
         private NodeConnectionState(ConnectionState state, long lastConnectAttempt, long reconnectBackoffMs,
@@ -507,6 +540,7 @@ final class ClusterConnectionStates {
         private InetAddress currentAddress() throws UnknownHostException {
             if (addresses.isEmpty()) {
                 // (Re-)initialize list
+                // mark 如果地址目录为空则进行域名解析
                 addresses = ClientUtils.resolve(host, hostResolver);
                 addressIndex = 0;
             }
@@ -515,8 +549,8 @@ final class ClusterConnectionStates {
         }
 
         /**
-         * Jumps to the next available resolved address for this node. If no other addresses are available, marks the
-         * list to be refreshed on the next {@link #currentAddress()} call.
+         * 跳转到该节点的下一个可用解析地址。如果没有其他可用地址，请标记
+         * 列表将在下一次 {@link #currentAddress()} 调用时刷新。
          */
         private void moveToNextAddress() {
             if (addresses.isEmpty())

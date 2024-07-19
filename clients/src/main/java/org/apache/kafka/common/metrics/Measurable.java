@@ -22,10 +22,10 @@ package org.apache.kafka.common.metrics;
 public interface Measurable extends MetricValueProvider<Double> {
 
     /**
-     * Measure this quantity and return the result as a double
-     * @param config The configuration for this metric
-     * @param now The POSIX time in milliseconds the measurement is being taken
-     * @return The measured value
+     * 测量这个数量并以 double 类型返回结果
+     * @param config 此指标的配置
+     * @param now 进行测量时的 POSIX 时间（毫秒）
+     * @return 测量得到的值
      */
     double measure(MetricConfig config, long now);
 

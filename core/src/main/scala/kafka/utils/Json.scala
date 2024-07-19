@@ -51,13 +51,17 @@ object Json {
     try Option(mapper.readTree(input)).map(JsonValue(_))
     catch { case _: JsonProcessingException => None }
 
-  def tryParseBytes(input: Array[Byte]): Either[JsonProcessingException, JsonValue] =
+  //noinspection DuplicatedCode
+  def tryParseBytes(input: Array[Byte]): Either[JsonProcessingException, JsonValue] = {
+    // mark 将byte解析成 [[com.fasterxml.jackson.databind.JsonNode]]
     try Right(mapper.readTree(input)).map(JsonValue(_))
     catch { case e: JsonProcessingException => Left(e) }
+  }
 
   /**
    * Parse a JSON byte array into either a generic type T, or a JsonProcessingException in the case of exception.
    */
+  //noinspection DuplicatedCode
   def parseBytesAs[T](input: Array[Byte])(implicit tag: ClassTag[T]): Either[JsonProcessingException, T] = {
     try Right(mapper.readValue(input, tag.runtimeClass).asInstanceOf[T])
     catch { case e: JsonProcessingException => Left(e) }
@@ -69,6 +73,7 @@ object Json {
    * @param input a JSON string to parse
    * @return An `Either` which in case of `Left` means an exception and `Right` is the actual return value.
    */
+  //noinspection DuplicatedCode
   def tryParseFull(input: String): Either[JsonProcessingException, JsonValue] =
     if (input == null || input.isEmpty)
       Left(new JsonParseException(MissingNode.getInstance().traverse(), "The input string shouldn't be empty"))

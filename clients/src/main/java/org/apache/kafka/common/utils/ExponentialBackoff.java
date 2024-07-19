@@ -20,12 +20,13 @@ package org.apache.kafka.common.utils;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * An utility class for keeping the parameters and providing the value of exponential
- * retry backoff, exponential reconnect backoff, exponential timeout, etc.
- * The formula is:
+ * mark 指数退避算法的谁先
+ * 一个用于保持参数并提供指数回退、指数重新连接回退、指数超时等值的工具类。
+ * 公式为：
  * Backoff(attempts) = random(1 - jitter, 1 + jitter) * initialInterval * multiplier ^ attempts
- * If initialInterval is greater or equal than maxInterval, a constant backoff of will be provided
- * This class is thread-safe
+ *                          抖动值                           初始时间间隔       乘数
+ * 如果 initialInterval 大于或等于 maxInterval，则提供一个固定的回退值。
+ * 此类是线程安全的。
  */
 public class ExponentialBackoff {
     private final int multiplier;
@@ -37,6 +38,7 @@ public class ExponentialBackoff {
         this.initialInterval = initialInterval;
         this.multiplier = multiplier;
         this.jitter = jitter;
+        // mark 计算一个最大指数位
         this.expMax = maxInterval > initialInterval ?
                 Math.log(maxInterval / (double) Math.max(initialInterval, 1)) / Math.log(multiplier) : 0;
     }

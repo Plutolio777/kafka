@@ -609,19 +609,19 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
    */
   def setTopicIds(topicIdReplicaAssignments: collection.Set[TopicIdReplicaAssignment],
                   expectedControllerEpochZkVersion: Int): Set[TopicIdReplicaAssignment] = {
-    /**
-     * mark 确保ZooKeeper中指定的持久化路径存在。
-     *
-     * 本方法通过递归创建路径的方式，确保给定的路径在ZooKeeper中存在。
-     * 如果路径已存在，則不会抛出异常；如果路径不存在，则会创建该路径。
-     *
-     * @param path 要确保存在的ZooKeeper路径。
-     */
-    def makeSurePersistentPathExists(path: String): Unit = {
-      // 通过递归方式创建路径，不抛出异常如果路径已存在
-      // mark 递归创建 throwIfPathExists 表示节点存在不抛出异常
-      createRecursive(path, data = null, throwIfPathExists = false)
-    }
+    //    /**
+    //     * mark 确保ZooKeeper中指定的持久化路径存在。
+    //     *
+    //     * 本方法通过递归创建路径的方式，确保给定的路径在ZooKeeper中存在。
+    //     * 如果路径已存在，則不会抛出异常；如果路径不存在，则会创建该路径。
+    //     *
+    //     * @param path 要确保存在的ZooKeeper路径。
+    //     */
+    //    def makeSurePersistentPathExists(path: String): Unit = {
+    //      // 通过递归方式创建路径，不抛出异常如果路径已存在
+    //      // mark 递归创建 throwIfPathExists 表示节点存在不抛出异常
+    //      createRecursive(path, data = null, throwIfPathExists = false)
+    //    }
 
     val updatedAssignments = topicIdReplicaAssignments.map {
       case TopicIdReplicaAssignment(topic, None, assignments) =>
@@ -887,7 +887,9 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
   def getDataAndVersion(path: String): (Option[Array[Byte]], Int) = {
     val (data, stat) = getDataAndStat(path)
     stat match {
+      // mark stat为空返回，UnknownVersion
       case ZkStat.NoStat => (data, ZkVersion.UnknownVersion)
+      // mark 否则返回数据和版本号
       case _ => (data, stat.getVersion)
     }
   }
@@ -900,11 +902,15 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
    *         returns (None, ZkStat.NoStat) if node doesn't exists and throws exception for any error
    */
   def getDataAndStat(path: String): (Option[Array[Byte]], Stat) = {
+    // mark 创建获取数据请求
     val getDataRequest = GetDataRequest(path)
+    // mark 发送请求并获取结果
     val getDataResponse = retryRequestUntilConnected(getDataRequest)
 
     getDataResponse.resultCode match {
+      // mark 成功返回data（json）和stat [[org.apache.zookeeper.data.Stat]]
       case Code.OK => (Option(getDataResponse.data), getDataResponse.stat)
+      // mark 节点不存在返回空
       case Code.NONODE => (None, ZkStat.NoStat)
       case _ => throw getDataResponse.resultException.get
     }
@@ -1974,7 +1980,7 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
   def secure: Boolean = isSecure
 
   /**
-   * 尝试重试发送请求直到与ZooKeeper连接成功。
+   * mark 尝试重试发送请求直到与ZooKeeper连接成功。
    * 此方法专门处理单个请求，直到与ZooKeeper建立连接为止。
    *
    * @param request                     需要发送的异步请求。

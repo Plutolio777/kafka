@@ -19,7 +19,7 @@ package org.apache.kafka.common;
 import java.util.Objects;
 
 /**
- * Information about a Kafka node
+ * Kafka节点信息
  */
 public class Node {
 

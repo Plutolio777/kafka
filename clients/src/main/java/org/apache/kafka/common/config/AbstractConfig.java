@@ -261,50 +261,65 @@ public class AbstractConfig {
     }
 
     /**
-     * Gets all original settings with the given prefix.
+     * 根据给定前缀获取所有原始设置。
+     * <p>
+     * 此方法根据指定的前缀过滤原始设置，并可选地在将键添加到结果映射之前删除前缀。当处理一组具有共同前缀的相关设置时，
+     * 如特定模块或功能的设置，此方法非常有用。
      *
-     * @param prefix the prefix to use as a filter
-     * @param strip  strip the prefix before adding to the output if set true
-     * @return a Map containing the settings with the prefix
+     * @param prefix 用于过滤键的前缀字符串
+     * @param strip  如果为true，在添加到结果之前从键中移除前缀；如果为false，则保留前缀
+     * @return 包含与前缀匹配的所有设置的映射，是否包含前缀取决于strip参数
      */
     public Map<String, Object> originalsWithPrefix(String prefix, boolean strip) {
+        // mark 初始化一个RecordingMap以记录过滤后的设置，使用指定的前缀
         Map<String, Object> result = new RecordingMap<>(prefix, false);
+        // mark 遍历原始设置中的所有条目
         for (Map.Entry<String, ?> entry : originals.entrySet()) {
+            // mark 如果配置key带有prefix前缀
             if (entry.getKey().startsWith(prefix) && entry.getKey().length() > prefix.length()) {
+                // mark 如果strip为true，从键中移除前缀；否则，保持原键不变
                 if (strip)
                     result.put(entry.getKey().substring(prefix.length()), entry.getValue());
                 else
                     result.put(entry.getKey(), entry.getValue());
             }
         }
+        // mark 返回包含过滤后设置的映射
         return result;
     }
 
+
     /**
-     * Put all keys that do not start with {@code prefix} and their parsed values in the result map and then
-     * put all the remaining keys with the prefix stripped and their parsed values in the result map.
+     * 将所有不以 {@code prefix} 开头的键及其解析后的值放入结果映射中，
+     * 然后将所有剩余的带有前缀并去除前缀后的键及其解析后的值也放入结果映射中。
      * <p>
-     * This is useful if one wants to allow prefixed configs to override default ones.
+     * 如果希望允许带前缀的配置覆盖默认配置，则这个方法非常有用。
      * <p>
-     * Two forms of prefixes are supported:
+     * 支持两种前缀形式：
      * <ul>
-     *     <li>listener.name.{listenerName}.some.prop: If the provided prefix is `listener.name.{listenerName}.`,
-     *         the key `some.prop` with the value parsed using the definition of `some.prop` is returned.</li>
-     *     <li>listener.name.{listenerName}.{mechanism}.some.prop: If the provided prefix is `listener.name.{listenerName}.`,
-     *         the key `{mechanism}.some.prop` with the value parsed using the definition of `some.prop` is returned.
-     *          This is used to provide per-mechanism configs for a broker listener (e.g sasl.jaas.config)</li>
+     *     <li>listener.name.{listenerName}.some.prop: 如果提供的前缀是 `listener.name.{listenerName}.`，
+     *         则返回使用 `some.prop` 定义解析后的键 `some.prop` 的值。</li>
+     *     <li>listener.name.{listenerName}.{mechanism}.some.prop: 如果提供的前缀是 `listener.name.{listenerName}.`，
+     *         则返回使用 `some.prop` 定义解析后的键 `{mechanism}.some.prop` 的值。
+     *         这用于为代理监听器提供每个机制的配置（例如 sasl.jaas.config）。</li>
      * </ul>
      * </p>
      */
     public Map<String, Object> valuesWithPrefixOverride(String prefix) {
         Map<String, Object> result = new RecordingMap<>(values(), prefix, true);
         for (Map.Entry<String, ?> entry : originals.entrySet()) {
+            // mark 如果配置key带有prefix前缀
             if (entry.getKey().startsWith(prefix) && entry.getKey().length() > prefix.length()) {
+                // mark 提取去掉前缀的部分
                 String keyWithNoPrefix = entry.getKey().substring(prefix.length());
+
+                // mark 判断是否存在配置key
                 ConfigDef.ConfigKey configKey = definition.configKeys().get(keyWithNoPrefix);
                 if (configKey != null)
+                    // mark 存在则覆盖原始key
                     result.put(keyWithNoPrefix, definition.parseValue(configKey, entry.getValue(), true));
                 else {
+                    // mark 尝试跳到下一个.后面再提取一次
                     String keyWithNoSecondaryPrefix = keyWithNoPrefix.substring(keyWithNoPrefix.indexOf('.') + 1);
                     configKey = definition.configKeys().get(keyWithNoSecondaryPrefix);
                     if (configKey != null)

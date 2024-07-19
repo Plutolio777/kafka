@@ -21,9 +21,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 /**
- * An interface abstracting the clock to use in unit testing classes that make use of clock time.
- *
- * Implementations of this class should be thread-safe.
+ * 用于抽象时钟的接口，用于在单元测试中使用时钟时间的类。
+ * 此接口的实现应该是线程安全的。
  */
 public interface Time {
 

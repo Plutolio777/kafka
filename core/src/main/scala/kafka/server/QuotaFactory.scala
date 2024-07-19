@@ -71,10 +71,21 @@ object QuotaFactory extends Logging {
     }
   }
 
+  /**
+   * 根据给定的配置、指标、时间和线程名前缀实例化 QuotaManagers 对象。
+   *
+   * @param cfg              KafkaConfig 对象，用于配置
+   * @param metrics          Metrics 对象，用于指标记录
+   * @param time             Time 对象，用于时间管理
+   * @param threadNamePrefix 线程名前缀，用于创建线程时命名
+   * @return 实例化的 QuotaManagers 对象，包含各种配额管理器
+   */
   def instantiate(cfg: KafkaConfig, metrics: Metrics, time: Time, threadNamePrefix: String): QuotaManagers = {
 
+    // mark 优先使用配置 client.quota.callback.class 指定的回调类
     val clientQuotaCallback = Option(cfg.getConfiguredInstance(KafkaConfig.ClientQuotaCallbackClassProp,
       classOf[ClientQuotaCallback]))
+
     QuotaManagers(
       new ClientQuotaManager(clientConfig(cfg), metrics, Fetch, time, threadNamePrefix, clientQuotaCallback),
       new ClientQuotaManager(clientConfig(cfg), metrics, Produce, time, threadNamePrefix, clientQuotaCallback),

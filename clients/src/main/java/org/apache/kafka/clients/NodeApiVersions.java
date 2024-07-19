@@ -36,15 +36,16 @@ import java.util.Optional;
 import java.util.TreeMap;
 
 /**
- * An internal class which represents the API versions supported by a particular node.
+ * 表示特定节点支持的 API 版本的内部类。
  */
 public class NodeApiVersions {
 
-    // A map of the usable versions of each API, keyed by the ApiKeys instance
+    // mark 每个 API 的可用版本的映射，由 ApiKeys 实例键入
     private final Map<ApiKeys, ApiVersion> supportedVersions = new EnumMap<>(ApiKeys.class);
 
-    // List of APIs which the broker supports, but which are unknown to the client
+    // mark Broker支持但客户端不支持的 API 列表
     private final List<ApiVersion> unknownApis = new ArrayList<>();
+
 
     private final Map<String, SupportedVersionRange> supportedFeatures;
 
@@ -58,11 +59,10 @@ public class NodeApiVersions {
     }
 
     /**
-     * Create a NodeApiVersions object.
+     * 创建一个 NodeApiVersions 对象。
      *
-     * @param overrides API versions to override. Any ApiVersion not specified here will be set to the current client
-     *                  value.
-     * @return A new NodeApiVersions object.
+     * @param overrides 要覆盖的 API 版本。未在此处指定的任何 ApiVersion 将被设置为当前客户端的值。
+     * @return 一个新的 NodeApiVersions 对象。
      */
     public static NodeApiVersions create(Collection<ApiVersion> overrides) {
         List<ApiVersion> apiVersions = new LinkedList<>(overrides);

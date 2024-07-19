@@ -26,7 +26,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.ScatteringByteChannel;
 
 /**
- * A size delimited Receive that consists of a 4 byte network-ordered size N followed by N bytes of content
+ * 大小分隔的接收，由 4 字节网络排序大小 N 后跟 N 字节内容组成
  */
 public class NetworkReceive implements Receive {
 

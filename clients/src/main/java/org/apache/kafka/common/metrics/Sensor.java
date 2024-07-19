@@ -36,21 +36,33 @@ import static java.util.Arrays.asList;
 import static java.util.Collections.unmodifiableList;
 
 /**
- * A sensor applies a continuous sequence of numerical values to a set of associated metrics. For example a sensor on
- * message size would record a sequence of message sizes using the {@link #record(double)} api and would maintain a set
- * of metrics about request sizes such as the average or max.
+ * Sensor 关联一组Metrics
+ * 传感器类用于对一组关联的指标应用连续的数值序列。例如，用于监控消息大小的传感器，
+ * 将使用 {@link #record(double)} API 记录一系列的消息大小，并维护关于请求大小的指标集，
+ * 如平均值或最大值。
  */
+
 public final class Sensor {
 
+    // mark 注册在传感器上的Metrics集合
     private final Metrics registry;
+    // mark 传感器名称
     private final String name;
+    // mark 传感器的父传感器
     private final Sensor[] parents;
+
     private final List<StatAndConfig> stats;
+    // mark 关联指标名称以及实例的映射表
     private final Map<MetricName, KafkaMetric> metrics;
+    // mark 指标配置
     private final MetricConfig config;
+    // mark 时间工具类
     private final Time time;
+    // mark 最后注册时间
     private volatile long lastRecordTime;
+    // mark 传感器未活动过期时间
     private final long inactiveSensorExpirationTimeMs;
+    // mark 指标对象锁
     private final Object metricLock;
 
     private static class StatAndConfig {
@@ -137,6 +149,7 @@ public final class Sensor {
     Sensor(Metrics registry, String name, Sensor[] parents, MetricConfig config, Time time,
            long inactiveSensorExpirationTimeSeconds, RecordingLevel recordingLevel) {
         super();
+        // mark Metrics 注册表
         this.registry = registry;
         this.name = Objects.requireNonNull(name);
         this.parents = parents == null ? new Sensor[0] : parents;
@@ -178,19 +191,18 @@ public final class Sensor {
     }
 
     /**
-     * Record an occurrence, this is just short-hand for {@link #record(double) record(1.0)}
+     * 无参记录方法 默认值为1
      */
     public void record() {
+        // 检查当前情况是否适合进行记录，如果适合则执行记录操作。
         if (shouldRecord()) {
             recordInternal(1.0d, time.milliseconds(), true);
         }
     }
 
+
     /**
-     * Record a value with this sensor
-     * @param value The value to record
-     * @throws QuotaViolationException if recording this value moves a metric beyond its configured maximum or minimum
-     *         bound
+     * 记录 value
      */
     public void record(double value) {
         if (shouldRecord()) {
@@ -199,12 +211,7 @@ public final class Sensor {
     }
 
     /**
-     * Record a value at a known time. This method is slightly faster than {@link #record(double)} since it will reuse
-     * the time stamp.
-     * @param value The value we are recording
-     * @param timeMs The current POSIX time in milliseconds
-     * @throws QuotaViolationException if recording this value moves a metric beyond its configured maximum or minimum
-     *         bound
+     * 无参记录方法 默认值为1 并且过期时间
      */
     public void record(double value, long timeMs) {
         if (shouldRecord()) {
@@ -213,13 +220,13 @@ public final class Sensor {
     }
 
     /**
-     * Record a value at a known time. This method is slightly faster than {@link #record(double)} since it will reuse
-     * the time stamp.
-     * @param value The value we are recording
-     * @param timeMs The current POSIX time in milliseconds
-     * @param checkQuotas Indicate if quota must be enforced or not
-     * @throws QuotaViolationException if recording this value moves a metric beyond its configured maximum or minimum
-     *         bound
+     * 在指定时间记录一个值。
+     * 与 {@link #record(double)} 方法相比，此方法在已知记录时间的情况下略快，因为它重用了时间戳，避免了重复计算当前时间，从而提高了性能。
+     *
+     * @param value 要记录的值，表示特定的测量或计数。
+     * @param timeMs 当前的POSIX时间（以毫秒为单位）。
+     * @param checkQuotas 指示是否需要执行配额限制。
+     * @throws QuotaViolationException 如果记录此值导致某个指标超出其配置的最大或最小界限，则抛出此异常。
      */
     public void record(double value, long timeMs, boolean checkQuotas) {
         if (shouldRecord()) {
@@ -227,11 +234,22 @@ public final class Sensor {
         }
     }
 
+
+    /**
+     * 内部记录方法，用于在特定时间记录给定的值到指标。
+     *
+     * @param value       要记录的数值
+     * @param timeMs      记录的时间戳（毫秒）
+     * @param checkQuotas 是否检查配额
+     *                    <p>
+     *                    此方法首先更新最后一次记录的时间，然后同步实例和指标锁以确保线程安全地更新所有统计信息。
+     *                    如果需要，会检查配额。最后，递归地为所有父级传感器调用record方法。
+     */
     private void recordInternal(double value, long timeMs, boolean checkQuotas) {
         this.lastRecordTime = timeMs;
         synchronized (this) {
             synchronized (metricLock()) {
-                // increment all the stats
+                // 增量更新所有统计信息
                 for (StatAndConfig statAndConfig : this.stats) {
                     statAndConfig.stat.record(statAndConfig.config(), value, timeMs);
                 }
@@ -272,26 +290,28 @@ public final class Sensor {
     }
 
     /**
-     * Register a compound statistic with this sensor with no config override
-     * @param stat The stat to register
-     * @return true if stat is added to sensor, false if sensor is expired
+     * 使用无配置覆盖为该传感器注册一个复合Metrics（CompoundStat）
+     * @param stat 要注册的统计信息(Metrics)
+     * @return 如果统计信息被添加到传感器，则返回 true；如果传感器已过期，则返回 false
      */
     public boolean add(CompoundStat stat) {
         return add(stat, null);
     }
 
     /**
-     * Register a compound statistic with this sensor which yields multiple measurable quantities (like a histogram)
-     * @param stat The stat to register
-     * @param config The configuration for this stat. If null then the stat will use the default configuration for this
-     *        sensor.
-     * @return true if stat is added to sensor, false if sensor is expired
+     * 使用指定配置为该传感器注册一个复合统计信息(CompoundStat)，该统计信息生成多个可测量的数量（如直方图）
+     * @param stat 要注册的统计信息
+     * @param config 此统计信息的配置。如果为 null，则该统计信息将使用传感器的默认配置。
+     * @return 如果统计信息被添加到传感器，则返回 true；如果传感器已过期，则返回 false
      */
     public synchronized boolean add(CompoundStat stat, MetricConfig config) {
+        // mark 如果该传感器过期则返回false 注册失败
         if (hasExpired())
             return false;
-
+        // mark 是否传入指定配置 如果没有则使用默认配置 默认配置参考 Metrics.config
         final MetricConfig statConfig = config == null ? this.config : config;
+
+        // mark Stat与Config的包装类 主要是调用Stat.record()记录指标 Sensor.record会让关联的指标都记录一组数据
         stats.add(new StatAndConfig(Objects.requireNonNull(stat), () -> statConfig));
         Object lock = metricLock();
         for (NamedMeasurable m : stat.stats()) {
@@ -308,42 +328,51 @@ public final class Sensor {
     }
 
     /**
-     * Register a metric with this sensor
-     * @param metricName The name of the metric
-     * @param stat The statistic to keep
-     * @return true if metric is added to sensor, false if sensor is expired
+     * 为该传感器注册一个度量指标（MeasurableStat）
+     * @param metricName 指标的名称
+     * @param stat 要保留的统计信息
+     * @return 如果指标被添加到传感器，则返回 true；如果传感器已过期，则返回 false
      */
     public boolean add(MetricName metricName, MeasurableStat stat) {
         return add(metricName, stat, null);
     }
 
     /**
-     * Register a metric with this sensor
+     * 为该传感器注册一个度量指标（MeasurableStat）
      *
-     * @param metricName The name of the metric
-     * @param stat       The statistic to keep
-     * @param config     A special configuration for this metric. If null use the sensor default configuration.
-     * @return true if metric is added to sensor, false if sensor is expired
+     * @param metricName 指标的名称
+     * @param stat 要保留的统计信息
+     * @param config 此指标的特殊配置。如果为 null，则使用传感器的默认配置。
+     * @return 如果指标被添加到传感器，则返回 true；如果传感器已过期，则返回 false
      */
     public synchronized boolean add(final MetricName metricName, final MeasurableStat stat, final MetricConfig config) {
+        // mark 如果Sensor过期 则返回false 注册失败
         if (hasExpired()) {
             return false;
+        // mark 指标已经注册了则直接放回true
         } else if (metrics.containsKey(metricName)) {
             return true;
         } else {
+            // mark 是否有传入MetricConfig用于覆盖默认的配置
             final MetricConfig statConfig = config == null ? this.config : config;
+            // mark 生成kafkaMetric 这个是一个统一的包装类
             final KafkaMetric metric = new KafkaMetric(
                 metricLock(),
                 Objects.requireNonNull(metricName),
                 Objects.requireNonNull(stat),
-                statConfig,
+                    statConfig,
                 time
             );
+            // mark 在注册表中注册该Metric
             KafkaMetric existingMetric = registry.registerMetric(metric);
+
+            // mark 重复注册抛出异常
             if (existingMetric != null) {
                 throw new IllegalArgumentException("A metric named '" + metricName + "' already exists, can't register another one.");
             }
+            // mark 添加到自己的缓存中
             metrics.put(metric.metricName(), metric);
+            // mark 添加stats记录
             stats.add(new StatAndConfig(Objects.requireNonNull(stat), metric::config));
             return true;
         }
@@ -359,8 +388,8 @@ public final class Sensor {
     }
 
     /**
-     * Return true if the Sensor is eligible for removal due to inactivity.
-     *        false otherwise
+     * 如果传感器由于不活动而符合移除条件，则返回 true；否则返回 false。
+     * 当前时间 - 最后注册时间 大于 inactiveSensorExpirationTimeMs 则为过期
      */
     public boolean hasExpired() {
         return (time.milliseconds() - this.lastRecordTime) > this.inactiveSensorExpirationTimeMs;

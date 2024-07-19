@@ -53,7 +53,7 @@ import scala.collection.{Map, Seq, immutable, mutable}
 import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Success, Try}
 
-// This file contains objects for encoding/decoding data stored in ZooKeeper nodes (znodes).
+// 该文件包含用于对 ZooKeeper 节点（znodes）中存储的数据进行编码/解码的对象。
 
 object ControllerZNode {
   def path = "/controller"
@@ -567,8 +567,13 @@ object ConsumerOffset {
 }
 
 object ZkVersion {
-  val MatchAnyVersion = -1 // if used in a conditional set, matches any version (the value should match ZooKeeper codebase)
-  val UnknownVersion = -2  // Version returned from get if node does not exist (internal constant for Kafka codebase, unused value in ZK)
+  // mark MatchAnyVersion 用于条件设置操作中匹配任何版本。
+  // 此值应与 ZooKeeper 代码库中的相应常量保持一致。
+  val MatchAnyVersion: Int = -1
+
+  // mark UnknownVersion 它表示当节点不存在时返回的版本。
+  // 此值在 ZooKeeper 本身中未使用。
+  val UnknownVersion: Int = -2
 }
 
 object ZkStat {
@@ -785,6 +790,7 @@ object ClusterZNode {
   def path = "/cluster"
 }
 
+// mark 存储集群id的节点 [/cluster/id -> {"version":"1","id":"{id}"}]
 object ClusterIdZNode {
   /**
    * 获取集群 ID 节点的路径。
@@ -813,6 +819,7 @@ object ClusterIdZNode {
    */
   def fromJson(clusterIdJson: Array[Byte]): String = {
     Json.parseBytes(clusterIdJson).map(_.asJsonObject("id").to[String]).getOrElse {
+      //noinspection MakeArrayToString
       throw new KafkaException(s"Failed to parse the cluster id json $clusterIdJson")
     }
   }
@@ -879,17 +886,13 @@ object DelegationTokenInfoZNode {
 }
 
 /**
- * Represents the status of the FeatureZNode.
+ * 表示 FeatureZNode 的状态。
  *
- * Enabled  -> This status means the feature versioning system (KIP-584) is enabled, and, the
- *             finalized features stored in the FeatureZNode are active. This status is written by
- *             the controller to the FeatureZNode only when the broker IBP config is greater than
- *             or equal to IBP_2_7_IV0.
+ * Enabled  -> 这个状态意味着特性版本系统 (KIP-584) 已启用，并且存储在 FeatureZNode 中的最终特性是活跃的。
+ * 当代理的 IBP 配置大于或等于 IBP_2_7_IV0 时，控制器会将此状态写入 FeatureZNode。
  *
- * Disabled -> This status means the feature versioning system (KIP-584) is disabled, and, the
- *             the finalized features stored in the FeatureZNode is not relevant. This status is
- *             written by the controller to the FeatureZNode only when the broker IBP config
- *             is less than IBP_2_7_IV0.
+ * Disabled -> 这个状态意味着特性版本系统 (KIP-584) 已禁用，并且存储在 FeatureZNode 中的最终特性是不相关的。
+ * 当代理的 IBP 配置小于 IBP_2_7_IV0 时，控制器会将此状态写入 FeatureZNode。
  */
 sealed trait FeatureZNodeStatus {
   def id: Int
@@ -904,6 +907,12 @@ object FeatureZNodeStatus {
     val id: Int = 1
   }
 
+  /**
+   * 根据状态 ID 返回相应的 FeatureZNodeStatus。
+   *
+   * @param id 状态 ID
+   * @return 对应的 FeatureZNodeStatus，如果 ID 无效，则返回 None
+   */
   def withNameOpt(id: Int): Option[FeatureZNodeStatus] = {
     id match {
       case Disabled.id => Some(Disabled)
@@ -923,6 +932,11 @@ object FeatureZNodeStatus {
 case class FeatureZNode(version: Int, status: FeatureZNodeStatus, features: Map[String, Short]) {
 }
 
+/**
+ * FeatureZNode 类用于管理 Kafka 集群中的特性节点。
+ * 它包含创建特性节点路径、将特性信息转换为 JSON 字节数组以及从 JSON 字节数组解析特性信息的方法。
+ * [/feature -> {"features":{<feature>},"version":2,"status":1}]
+ */
 object FeatureZNode {
   private val VersionKey = "version"
   private val StatusKey = "status"
@@ -984,56 +998,78 @@ object FeatureZNode {
   }
 
   /**
-   * Decodes the contents of the feature ZK node from Array[Byte] to a FeatureZNode.
+   * mark 将特性 ZK 节点的内容从 Array[Byte] 解码为 FeatureZNode。
    *
-   * @param jsonBytes   the contents of the feature ZK node
-   *
-   * @return            the FeatureZNode created from jsonBytes
-   *
-   * @throws IllegalArgumentException   if the Array[Byte] can not be decoded.
+   * @param jsonBytes 特性 ZK 节点的内容
+   * @return 由 jsonBytes 创建的 FeatureZNode
+   * @throws IllegalArgumentException 如果 Array[Byte] 无法解码，则抛出异常。
    */
   def decode(jsonBytes: Array[Byte]): FeatureZNode = {
     Json.tryParseBytes(jsonBytes) match {
+      // mark 解析成功
       case Right(js) =>
+        // mark 转换成JsonObject
         val featureInfo = js.asJsonObject
+        // mark 获取version
         val version = featureInfo(VersionKey).to[Int]
+        // mark version <1 >2 则抛异常 就目前固定是1呗
         if (version < V1 || version > V2) {
           throw new IllegalArgumentException(s"Unsupported version: $version of feature information: " +
             s"${new String(jsonBytes, UTF_8)}")
         }
-
+        // mark 获取status
         val statusInt = featureInfo
           .get(StatusKey)
           .flatMap(_.to[Option[Int]])
+        // mark 如果status为空抛异常
         if (statusInt.isEmpty) {
           throw new IllegalArgumentException("Status can not be absent in feature information: " +
             s"${new String(jsonBytes, UTF_8)}")
         }
+
         val status = FeatureZNodeStatus.withNameOpt(statusInt.get)
         if (status.isEmpty) {
           throw new IllegalArgumentException(
             s"Malformed status: $statusInt found in feature information: ${new String(jsonBytes, UTF_8)}")
         }
 
+        // mark 解析feature <feature名称 -> 最大支持版本号>
         val finalizedFeatures = decodeFeature(version, featureInfo, jsonBytes)
+        // mark 返回数据包装的节点
         FeatureZNode(version, status.get, finalizedFeatures)
+      // mark 解析失败
       case Left(e) =>
         throw new IllegalArgumentException(s"Failed to parse feature information: " +
           s"${new String(jsonBytes, UTF_8)}", e)
     }
   }
 
+  /**
+   * mark 解码feature节点中的features信息，生成特性名称和版本的映射。
+   *
+   * @param version     特性版本
+   * @param featureInfo 包含特性信息的 JsonObject
+   * @param jsonBytes   原始 JSON 字节数组
+   * @return 特性名称和最大版本的映射
+   * @throws IllegalArgumentException 如果特性信息缺少必要的字段或字段值不合法，则抛出异常
+   */
   private def decodeFeature(version: Int, featureInfo: JsonObject, jsonBytes: Array[Byte]): Map[String, Short] = {
+    // mark 获取features的内容并解析成 Map<String, Map<String, Int>>
     val featuresMap = featureInfo
       .get(FeaturesKey)
       .flatMap(_.to[Option[Map[String, Map[String, Int]]]])
 
+    // mark 如果不存在则抛出异常
     if (featuresMap.isEmpty) {
       throw new IllegalArgumentException("Features map can not be absent in: " +
         s"${new String(jsonBytes, UTF_8)}")
     }
+
     featuresMap.get.map {
+      // mark 遍历 获取feature名称和版本信息
       case (featureName, versionInfo) =>
+
+        // mark 检查字段是否完整
         if (version == V1 && !versionInfo.contains(V1MinVersionKey)) {
           throw new IllegalArgumentException(s"$V1MinVersionKey absent in [$versionInfo]")
         }
@@ -1041,6 +1077,7 @@ object FeatureZNode {
           throw new IllegalArgumentException(s"$V1MaxVersionKey absent in [$versionInfo]")
         }
 
+        // mark 获取最大最小版本
         val minValueOpt = versionInfo.get(V1MinVersionKey)
         val maxValue = versionInfo(V1MaxVersionKey)
 
@@ -1050,6 +1087,7 @@ object FeatureZNode {
         if (maxValue < 1) {
           throw new IllegalArgumentException(s"Expected maxValue >= 1, but received maxValue: $maxValue")
         }
+        // mark 返回映射
         featureName -> maxValue.toShort
     }
   }

@@ -67,8 +67,8 @@ public class ManualMetadataUpdater implements MetadataUpdater {
 
     @Override
     public void handleServerDisconnect(long now, String nodeId, Optional<AuthenticationException> maybeAuthException) {
-        // We don't fail the broker on failures. There should be sufficient information from
-        // the NetworkClient logs to indicate the reason for the failure.
+        // 我们不会在失败时让代理失败。应该有足够的信息来自
+        // NetworkClient 日志指示失败原因。
     }
 
     @Override

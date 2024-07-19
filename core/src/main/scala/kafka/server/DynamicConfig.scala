@@ -29,6 +29,7 @@ import org.apache.kafka.common.config.ConfigDef.Type._
 import scala.jdk.CollectionConverters._
 
 /**
+ * mark 这里类里面保存的是仅仅只能动态配置的属性
   * Class used to hold dynamic configs. These are configs which have no physical manifestation in the server.properties
   * and can only be set dynamically.
   */
@@ -36,8 +37,11 @@ object DynamicConfig {
 
   object Broker {
     // Properties
+    // mark 限制leader副本的同步速率
     val LeaderReplicationThrottledRateProp = "leader.replication.throttled.rate"
+    // mark 限制follower副本的接收速率
     val FollowerReplicationThrottledRateProp = "follower.replication.throttled.rate"
+    // mark 限制目录变更时同步数据的速率
     val ReplicaAlterLogDirsIoMaxBytesPerSecondProp = "replica.alter.log.dirs.io.max.bytes.per.second"
 
     // Defaults
@@ -59,7 +63,9 @@ object DynamicConfig {
       .define(LeaderReplicationThrottledRateProp, LONG, DefaultReplicationThrottledRate, atLeast(0), MEDIUM, LeaderReplicationThrottledRateDoc)
       .define(FollowerReplicationThrottledRateProp, LONG, DefaultReplicationThrottledRate, atLeast(0), MEDIUM, FollowerReplicationThrottledRateDoc)
       .define(ReplicaAlterLogDirsIoMaxBytesPerSecondProp, LONG, DefaultReplicationThrottledRate, atLeast(0), MEDIUM, ReplicaAlterLogDirsIoMaxBytesPerSecondDoc)
+    // mark 这里会把独有的三个配置和可以动态配置相加（所有的动态配置）
     DynamicBrokerConfig.addDynamicConfigs(brokerConfigDef)
+    // mark KafkaConfig.configNames为所有的kafka配置 减去动态配置 则获得非动态配置集合
     val nonDynamicProps = KafkaConfig.configNames.toSet -- brokerConfigDef.names.asScala
 
     def names = brokerConfigDef.names

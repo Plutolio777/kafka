@@ -24,23 +24,23 @@ import org.apache.kafka.common.memory.MemoryPool;
 
 
 /**
- * A ChannelBuilder interface to build Channel based on configs
+ * 基于配置构建 Channel 的 ChannelBuilder 接口
  */
 public interface ChannelBuilder extends AutoCloseable, Configurable {
 
     /**
-     * returns a Channel with TransportLayer and Authenticator configured.
-     * @param  id  channel id
-     * @param  key SelectionKey
-     * @param  maxReceiveSize max size of a single receive buffer to allocate
-     * @param  memoryPool memory pool from which to allocate buffers, or null for none
+     * 返回一个配置了 TransportLayer 和 Authenticator 的通道。
+     * @param id 通道ID
+     * @param key SelectionKey
+     * @param maxReceiveSize 单个接收缓冲区的最大大小
+     * @param memoryPool 内存池，用于分配缓冲区；如果不需要，可以传入 null
      * @return KafkaChannel
      */
     KafkaChannel buildChannel(String id, SelectionKey key, int maxReceiveSize,
                               MemoryPool memoryPool, ChannelMetadataRegistry metadataRegistry) throws KafkaException;
 
     /**
-     * Closes ChannelBuilder
+     * 关闭 ChannelBuilder
      */
     @Override
     void close();

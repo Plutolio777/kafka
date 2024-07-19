@@ -28,15 +28,14 @@ import org.apache.kafka.common.internals.FatalExitError
 import scala.concurrent.TimeoutException
 
 /**
- * Listens to changes in the ZK feature node, via the ZK client. Whenever a change notification
- * is received from ZK, the feature cache in FinalizedFeatureCache is asynchronously updated
- * to the latest features read from ZK. The cache updates are serialized through a single
- * notification processor thread.
+ * 通过 ZK 客户端监听 ZK feature节点的变化。每当从 ZK 接收到变更通知时，
+ * FinalizedFeatureCache 中的features缓存将异步更新为从 ZK 读取的最新功能。
+ * 缓存更新通过单个通知处理线程进行序列化。
  *
- * This updates the features cached in ZkMetadataCache
+ * 这会更新 ZkMetadataCache 中缓存的功能。
  *
- * @param finalizedFeatureCache   the finalized feature cache
- * @param zkClient                the Zookeeper client
+ * @param finalizedFeatureCache 最终功能缓存
+ * @param zkClient              Zookeeper 客户端
  */
 class FinalizedFeatureChangeListener(private val finalizedFeatureCache: ZkMetadataCache,
                                      private val zkClient: KafkaZkClient) extends Logging {
@@ -53,19 +52,19 @@ class FinalizedFeatureChangeListener(private val finalizedFeatureCache: ZkMetada
     def this(featureZkNodePath: String) = this(featureZkNodePath, Option.empty)
 
     /**
-     * Updates the feature cache in FinalizedFeatureCache with the latest features read from the
-     * ZK node in featureZkNodePath. If the cache update is not successful, then, a suitable
-     * exception is raised.
+     * 使用从 featureZkNodePath 的 ZK 节点读取的最新功能更新 FinalizedFeatureCache 中的功能缓存。
+     * 如果缓存更新不成功，则抛出合适的异常。
      *
-     * NOTE: if a notifier was provided in the constructor, then, this method can be invoked exactly
-     * once successfully. A subsequent invocation will raise an exception.
+     * 注意：如果在构造函数中提供了通知器（notifier），则该方法只能成功调用一次。
+     * 之后的调用将抛出异常。
      *
-     * @throws   IllegalStateException, if a non-empty notifier was provided in the constructor, and
-     *           this method is called again after a successful previous invocation.
-     * @throws   FeatureCacheUpdateException, if there was an error in updating the
-     *           FinalizedFeatureCache.
+     * mark 这里设计的比较好 使用CountDownLatch来实现任务的生命周期
+     *
+     * @throws IllegalStateException       如果在构造函数中提供了非空的通知器，并且在成功调用该方法后再次调用此方法。
+     * @throws FeatureCacheUpdateException 如果在更新 FinalizedFeatureCache 时发生错误。
      */
     def updateLatestOrThrow(): Unit = {
+      // mark 使用CountDownLatch控制任务只被执行一次
       maybeNotifyOnce.foreach(notifier => {
         if (notifier.getCount != 1) {
           throw new IllegalStateException(
@@ -88,14 +87,17 @@ class FinalizedFeatureChangeListener(private val finalizedFeatureCache: ZkMetada
       //                                           API ensures that unknown version is returned only when the
       //                                           ZK node is absent. Therefore dataBytes should be empty in such
       //                                           a case.
+      // mark 如果zkVersion为未知 则清空feature
       if (version == ZkVersion.UnknownVersion) {
         info(s"Feature ZK node at path: $featureZkNodePath does not exist")
         finalizedFeatureCache.clearFeatures()
       } else {
         var maybeFeatureZNode: Option[FeatureZNode] = Option.empty
         try {
+          // mark 尝试将bytes解码成FeatureZNode
           maybeFeatureZNode = Some(FeatureZNode.decode(mayBeFeatureZNodeBytes.get))
         } catch {
+          // mark 解析失败则清除缓存中的feature信息
           case e: IllegalArgumentException => {
             error(s"Unable to deserialize feature ZK node at path: $featureZkNodePath", e)
             finalizedFeatureCache.clearFeatures()
@@ -103,11 +105,15 @@ class FinalizedFeatureChangeListener(private val finalizedFeatureCache: ZkMetada
         }
         maybeFeatureZNode.foreach(featureZNode => {
           featureZNode.status match {
+            // mark 禁用feature功能
             case FeatureZNodeStatus.Disabled => {
               info(s"Feature ZK node at path: $featureZkNodePath is in disabled status.")
+              // mark 如果禁用的话还是要清楚缓存中的feature信息
               finalizedFeatureCache.clearFeatures()
             }
+            // mark 启用feature功能
             case FeatureZNodeStatus.Enabled => {
+              // mark 更新缓存中的features信息
               finalizedFeatureCache.updateFeaturesOrThrow(featureZNode.features.toMap, version)
             }
             case _ => throw new IllegalStateException(s"Unexpected FeatureZNodeStatus found in $featureZNode")
@@ -115,20 +121,20 @@ class FinalizedFeatureChangeListener(private val finalizedFeatureCache: ZkMetada
         })
       }
 
+      // mark 如果有 CountDownLatch 则通知一次 用于通知外部该事件是否已经完成
       maybeNotifyOnce.foreach(notifier => notifier.countDown())
     }
 
     /**
-     * Waits until at least a single updateLatestOrThrow completes successfully. This method returns
-     * immediately if an updateLatestOrThrow call had already completed successfully.
+     * 等待直到至少有一个 updateLatestOrThrow 成功完成。如果已经有一个 updateLatestOrThrow
+     * 调用成功完成，则该方法立即返回。
      *
-     * @param waitTimeMs   the timeout for the wait operation
-     *
-     * @throws             TimeoutException if the wait can not be completed in waitTimeMs
-     *                     milli seconds
+     * @param waitTimeMs 等待操作的超时时间（毫秒）
+     * @throws TimeoutException 如果在 waitTimeMs 毫秒内无法完成等待
      */
     def awaitUpdateOrThrow(waitTimeMs: Long): Unit = {
       maybeNotifyOnce.foreach(notifier => {
+        // mark 等待 CountDownLatch 完成，否则超时
         if (!notifier.await(waitTimeMs, TimeUnit.MILLISECONDS)) {
           throw new TimeoutException(
             s"Timed out after waiting for ${waitTimeMs}ms for FeatureCache to be updated.")
@@ -138,34 +144,40 @@ class FinalizedFeatureChangeListener(private val finalizedFeatureCache: ZkMetada
   }
 
   /**
-   * A shutdownable thread to process feature node change notifications that are populated into the
-   * queue. If any change notification can not be processed successfully (unless it is due to an
-   * interrupt), the thread treats it as a fatal event and triggers Broker exit.
+   * mark 变更通知处理器线程，可被关闭，用于处理填充到队列中的特征节点变更通知。
    *
-   * @param name   name of the thread
+   * @param name 线程的名称
    */
   private class ChangeNotificationProcessorThread(name: String) extends ShutdownableThread(name = name) {
     override def doWork(): Unit = {
       try {
+        // mark 不断地从queue中取出任务执行 updateLatestOrThrow 方法
         queue.take.updateLatestOrThrow()
       } catch {
         case ie: InterruptedException =>
-          // While the queue is empty and this thread is blocking on taking an item from the queue,
-          // a concurrent call to FinalizedFeatureChangeListener.close() could interrupt the thread
-          // and cause an InterruptedException to be raised from queue.take(). In such a case, it is
-          // safe to ignore the exception if the thread is being shutdown. We raise the exception
-          // here again, because, it is ignored by ShutdownableThread if it is shutting down.
-          throw ie
+          // 当队列为空且此线程在从队列中取元素时被阻塞，
+          // 并发调用FinalizedFeatureChangeListener.close()可能会中断线程并从queue.take()引发InterruptedException。
+          // 在这种情况下，如果线程正在关闭，忽略异常是安全的。我们在这里再次抛出异常，
+          // 因为ShutdownableThread在关闭时会忽略它。
+        throw ie
         case cacheUpdateException: FeatureCacheUpdateException =>
+          // mark 处理特征ZK节点变更事件失败，将导致Broker最终退出（如果出现不兼容的Feature时会抛出该异常）
           error("Failed to process feature ZK node change event. The broker will eventually exit.", cacheUpdateException)
+          // mark 抛出该异常会在ShutdownableThread中捕获并且最终退出Broker
           throw new FatalExitError(1)
         case e: Exception =>
-          // do not exit for exceptions unrelated to cache change processing (e.g. ZK session expiration)
-          warn("Unexpected exception in feature ZK node change event processing; will continue processing.", e)
+          // mark 对于与缓存变更处理无关的异常（例如ZK会话过期），不退出程序
+        warn("Unexpected exception in feature ZK node change event processing; will continue processing.", e)
       }
     }
   }
 
+  /**
+   * 继承了 ZNodeChangeHandler 当 /feature路径的创建,删除,数据变更时都会发起更新事件
+   *
+   * @return 无返回值
+   */
+  //noinspection ScalaWeakerAccess
   // Feature ZK node change handler.
   object FeatureZNodeChangeHandler extends ZNodeChangeHandler {
     override val path: String = FeatureZNode.path
@@ -190,45 +202,55 @@ class FinalizedFeatureChangeListener(private val finalizedFeatureCache: ZkMetada
   }
 
   object ZkStateChangeHandler extends StateChangeHandler {
-    val path: String = FeatureZNode.path
+    val path: String = FeatureZNode.path // mark 用于监听/feature路径的状态改变
 
     override val name: String = path
 
+
+    /**
+     * 继承了 StateChangeHandler 当 /feature路径的状态改变是会收到通知 发起更新延时操作。
+     *
+     * @return 无返回值
+     */
     override def afterInitializingSession(): Unit = {
       queue.add(new FeatureCacheUpdater(path))
     }
   }
 
+  // mark feature节点变更时请求更新缓存的事件队列
   private val queue = new LinkedBlockingQueue[FeatureCacheUpdater]
 
+  // mark 处理feature信息更新缓存的线程
   private val thread = new ChangeNotificationProcessorThread("feature-zk-node-event-process-thread")
 
   /**
-   * This method initializes the feature ZK node change listener. Optionally, it also ensures to
-   * update the FinalizedFeatureCache once with the latest contents of the feature ZK node
-   * (if the node exists). This step helps ensure that feature incompatibilities (if any) in brokers
-   * are conveniently detected before the initOrThrow() method returns to the caller. If feature
-   * incompatibilities are detected, this method will throw an Exception to the caller, and the Broker
-   * will exit eventually.
+   * 该方法初始化功能 ZK 节点更改监听器。可选地，它还确保使用功能 ZK 节点的最新内容更新一次
+   * FinalizedFeatureCache（如果节点存在）。这一步有助于在 initOrThrow() 方法返回给调用者之前
+   * 方便地检测代理中的功能不兼容性（如果有）。如果检测到功能不兼容性，该方法将向调用者抛出
+   * 异常，代理将最终退出。
    *
-   * @param waitOnceForCacheUpdateMs   # of milli seconds to wait for feature cache to be updated once.
-   *                                   (should be > 0)
-   *
-   * @throws Exception if feature incompatibility check could not be finished in a timely manner
+   * @param waitOnceForCacheUpdateMs 等待功能缓存更新一次的毫秒数。（应大于 0）
+   * @throws Exception 如果无法及时完成功能不兼容性检查
    */
   def initOrThrow(waitOnceForCacheUpdateMs: Long): Unit = {
     if (waitOnceForCacheUpdateMs <= 0) {
       throw new IllegalArgumentException(
         s"Expected waitOnceForCacheUpdateMs > 0, but provided: $waitOnceForCacheUpdateMs")
     }
-
+    // mark 启动处理线程（zk中的数据变更了会通知到这个线程进行处理）
     thread.start()
+
+    // mark 注册zk状态变更监听器
     zkClient.registerStateChangeHandler(ZkStateChangeHandler)
+    // mark 注册zk数据变更监听器
     zkClient.registerZNodeChangeHandlerAndCheckExistence(FeatureZNodeChangeHandler)
+
+    // mark 初始话的时候先更新一下 所以这里发了一个更新事件到队列中
     val ensureCacheUpdateOnce = new FeatureCacheUpdater(
       FeatureZNodeChangeHandler.path, Some(new CountDownLatch(1)))
     queue.add(ensureCacheUpdateOnce)
     try {
+      // mark 通过 CountDownLatch 来获取更新动作是否为完成
       ensureCacheUpdateOnce.awaitUpdateOrThrow(waitOnceForCacheUpdateMs)
     } catch {
       case e: Exception => {
@@ -239,13 +261,16 @@ class FinalizedFeatureChangeListener(private val finalizedFeatureCache: ZkMetada
   }
 
   /**
-   * Closes the feature ZK node change listener by unregistering the listener from ZK client,
-   * clearing the queue and shutting down the ChangeNotificationProcessorThread.
+   * 关闭功能 ZK 节点更改监听器，通过从 ZK 客户端注销监听器，
+   * 清空队列并关闭 ChangeNotificationProcessorThread。
    */
   def close(): Unit = {
+    // mark 写在zookeeper监听处理器
     zkClient.unregisterStateChangeHandler(ZkStateChangeHandler.name)
     zkClient.unregisterZNodeChangeHandler(FeatureZNodeChangeHandler.path)
+    // mark 清除队列
     queue.clear()
+    // mark 关闭线程
     thread.shutdown()
   }
 

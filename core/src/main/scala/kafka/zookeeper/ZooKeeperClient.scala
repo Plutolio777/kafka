@@ -67,8 +67,10 @@ class ZooKeeperClient(connectString: String,
   this.logIdent = s"[ZooKeeperClient $name] "
   // mark 准备的读写锁
   private val initializationLock = new ReentrantReadWriteLock()
-  // mark 准备的可重入锁
+  // mark 当zookeeper连接过期时使用的锁
   private val isConnectedOrExpiredLock = new ReentrantLock()
+
+  // mark zookeeper连接过期时使用的通知条件
   private val isConnectedOrExpiredCondition = isConnectedOrExpiredLock.newCondition()
   private val zNodeChangeHandlers = new ConcurrentHashMap[String, ZNodeChangeHandler]().asScala
   private val zNodeChildChangeHandlers = new ConcurrentHashMap[String, ZNodeChildChangeHandler]().asScala
@@ -81,9 +83,13 @@ class ZooKeeperClient(connectString: String,
 
   private val metricNames = Set[String]()
 
-  // The state map has to be created before creating ZooKeeper since it's needed in the ZooKeeper callback.
+  // 在创建ZooKeeper之前必须先创建状态映射，因为ZooKeeper回调中需要使用到它。
+  /**
+   * mark 生成zookeeper状态仪表映射。（卡夫卡监听zookeeper连接状态时会进行回调）
+   */
   private val stateToMeterMap = {
     import KeeperState._
+    // 定义从ZooKeeper连接状态到事件描述的映射。
     val stateToEventTypeMap = Map(
       Disconnected -> "Disconnects",
       SyncConnected -> "SyncConnects",
@@ -92,12 +98,17 @@ class ZooKeeperClient(connectString: String,
       SaslAuthenticated -> "SaslAuthentications",
       Expired -> "Expires"
     )
+    // mark 遍历映射，为每种连接状态创建一个计数器。
+    // mark 计数器用于测量每种事件类型发生的速率。
     stateToEventTypeMap.map { case (state, eventType) =>
       val name = s"ZooKeeper${eventType}PerSec"
+      // 将计数器名称添加到metricNames集合中，以便后续引用。
       metricNames += name
+      // mark 为当前连接状态和事件类型创建一个新的计数器。
       state -> newMeter(name, eventType.toLowerCase(Locale.ROOT), TimeUnit.SECONDS)
     }
   }
+
 
   info(s"Initializing a new session to $connectString.")
   // Fail-fast if there's an error during construction (so don't call initialize, which retries forever)
@@ -401,16 +412,22 @@ class ZooKeeperClient(connectString: String,
     zooKeeper
   }
 
+  /**
+   * mark 重新初始化ZooKeeper客户端。
+   * 当当前会话不再有效或已过期时，此方法用于创建一个新的ZooKeeper会话。
+   * 它确保ZooKeeper客户端处于可进行后续操作的就绪状态。
+   */
   private def reinitialize(): Unit = {
-    // Initialization callbacks are invoked outside of the lock to avoid deadlock potential since their completion
-    // may require additional Zookeeper requests, which will block to acquire the initialization lock
+    // 在锁定之外调用所有状态更改处理器的初始化前回调，
+    // 避免死锁风险，因为这些回调的完成可能需要额外的Zookeeper请求，
+    // 这些请求将会阻塞以获取初始化锁。
     stateChangeHandlers.values.foreach(callBeforeInitializingSession _)
 
     inWriteLock(initializationLock) {
       if (!connectionState.isAlive) {
         zooKeeper.close()
         info(s"Initializing a new session to $connectString.")
-        // retry forever until ZooKeeper can be instantiated
+        // 持续重试直到ZooKeeper实例化成功
         var connected = false
         while (!connected) {
           try {
@@ -418,15 +435,17 @@ class ZooKeeperClient(connectString: String,
             connected = true
           } catch {
             case e: Exception =>
-              info("Error when recreating ZooKeeper, retrying after a short sleep", e)
+              info("在重新创建ZooKeeper时遇到错误，短暂休眠后重试", e)
               Thread.sleep(RetryBackoffMs)
           }
         }
       }
     }
 
+    // 调用所有状态更改处理器的初始化后回调
     stateChangeHandlers.values.foreach(callAfterInitializingSession _)
   }
+
 
   /**
    * Close the zookeeper client to force session reinitialization. This is visible for testing only.
@@ -436,11 +455,20 @@ class ZooKeeperClient(connectString: String,
     reinitialize()
   }
 
+  /**
+   * mark 在初始化会话之前调用处理程序的方法。
+   * 此方法旨在在会话初始化之前，安全地调用处理程序的beforeInitializingSession方法。
+   * 如果在调用过程中发生异常，将会记录错误信息。
+   *
+   * @param handler StateChangeHandler 实例，它实现了beforeInitializingSession方法。
+   */
   private def callBeforeInitializingSession(handler: StateChangeHandler): Unit = {
     try {
+      // mark 尝试调用处理程序的beforeInitializingSession方法。
       handler.beforeInitializingSession()
     } catch {
       case t: Throwable =>
+        // 捕获在调用处理程序方法时抛出的任何异常，并记录错误信息。
         error(s"Uncaught error in handler ${handler.name}", t)
     }
   }
@@ -455,67 +483,135 @@ class ZooKeeperClient(connectString: String,
   }
 
   // Visibility for testing
+
+  /**
+   * mark 通过调度器进行延时初始化
+   *
+   * 此方法用于在指定延迟后安排一个重新初始化任务。任务会被添加到重初始化调度器中，
+   * 并在延迟时间后执行。任务执行时，会打印一条信息并调用重新初始化函数。
+   *
+   * @param name    任务名称，用于标识和管理调度器中的任务。
+   * @param message 在任务执行时打印的信息，用于日志记录和问题追踪。
+   * @param delayMs 任务延迟执行的时间，以毫秒为单位。
+   */
   private[zookeeper] def scheduleReinitialize(name: String, message: String, delayMs: Long): Unit = {
+    // mark 使用重初始化调度器安排任务，在指定延迟后执行。
     reinitializeScheduler.schedule(name, () => {
+      // mark 打印信息日志。
       info(message)
+      // mark 调用重新初始化函数。
       reinitialize()
     }, delayMs, period = -1L, unit = TimeUnit.MILLISECONDS)
   }
 
   private def threadPrefix: String = name.replaceAll("\\s", "") + "-"
 
-  // package level visibility for testing only
+  /**
+   * 实现zookeeper中watcher，zookeeper中的数据变更时会以Event形式进行通知
+   *
+   */
   private[zookeeper] object ZooKeeperClientWatcher extends Watcher {
+    /**
+     * 处理来自ZooKeeper的监控事件。
+     *
+     * @param event 来自ZooKeeper的监控事件。
+     */
     override def process(event: WatchedEvent): Unit = {
-      debug(s"Received event: $event")
+      // 在调试级别记录接收到的事件。
+      debug(s"接收到事件: $event")
+
+      // mark 根据事件路径是否存在来处理事件。
       Option(event.getPath) match {
+        // mark 如果没有路径，表示连接状态发生了变化。 （交由StateChangeHandler进行处理）
         case None =>
+          // mark 从事件中获取连接状态。
           val state = event.getState
+          // mark 根据连接状态增加相应的meter计数器。
           stateToMeterMap.get(state).foreach(_.mark())
+          // mark 通知所有等待线程连接状态已改变。
           inLock(isConnectedOrExpiredLock) {
             isConnectedOrExpiredCondition.signalAll()
           }
+
+          // mark 如果认证失败，进行特殊处理。
           if (state == KeeperState.AuthFailed) {
-            error(s"Auth failed, initialized=$isFirstConnectionEstablished connectionState=$connectionState")
+            // 记录认证失败日志。
+            error(s"认证失败, 初始化状态=$isFirstConnectionEstablished 连接状态=$connectionState")
+            // mark 通知所有处理器认证失败。
             stateChangeHandlers.values.foreach(_.onAuthFailure())
 
-            // If this is during initial startup, we fail fast. Otherwise, schedule retry.
+            // mark 根据初始连接是否建立决定立即重试初始化或安排重试。
             val initialized = inLock(isConnectedOrExpiredLock) {
               isFirstConnectionEstablished
             }
             if (initialized && !connectionState.isAlive)
-              scheduleReinitialize("auth-failed", "Reinitializing due to auth failure.", RetryBackoffMs)
+              scheduleReinitialize("auth-failed", "由于认证失败重新初始化.", RetryBackoffMs)
           } else if (state == KeeperState.Expired) {
-            scheduleReinitialize("session-expired", "Session expired.", delayMs = 0L)
+            // 如果会话过期，安排无延迟的重新初始化。
+            scheduleReinitialize("session-expired", "会话过期.", delayMs = 0L)
           }
+        // 如果有路径，表示特定节点的数据或结构发生了变化。
         case Some(path) =>
+          // 根据事件类型处理节点变更。
           (event.getType: @unchecked) match {
+            // mark 节点子节点改变通知
             case EventType.NodeChildrenChanged => zNodeChildChangeHandlers.get(path).foreach(_.handleChildChange())
+            // mark 节点创建通知
             case EventType.NodeCreated => zNodeChangeHandlers.get(path).foreach(_.handleCreation())
+            // mark 节点删除通知
             case EventType.NodeDeleted => zNodeChangeHandlers.get(path).foreach(_.handleDeletion())
+            // mark 数据节点变更通知
             case EventType.NodeDataChanged => zNodeChangeHandlers.get(path).foreach(_.handleDataChange())
           }
       }
     }
   }
+
 }
 
+/**
+ * mark 状态变更处理器接口。
+ */
 trait StateChangeHandler {
+
+  // mark 处理器的名称。该属性用于唯一标识状态变更处理器。
   val name: String
+
+  // mark 在初始化会话之前调用的方法。
   def beforeInitializingSession(): Unit = {}
+
+  // mark 在初始化会话之后调用的方法。
   def afterInitializingSession(): Unit = {}
+
+  // mark 认证失败时调用的方法
   def onAuthFailure(): Unit = {}
 }
 
+/**
+ * mark ZNodeChangeHandler 类定义了 ZooKeeper 数据节点变化时的处理行为。
+ */
 trait ZNodeChangeHandler {
+  // mark 节点的路径，用于标识特定的ZNode
   val path: String
+
+  // mark 当节点被创建时调用的方法。
   def handleCreation(): Unit = {}
+
+  // mark 当节点被删除时调用的方法。
   def handleDeletion(): Unit = {}
+
+  // mark 当节点数据发生变更时调用的方法。
   def handleDataChange(): Unit = {}
 }
 
+/**
+ * ZNodeChildChangeHandler 特质定义了处理ZNode子节点变化的接口。
+ * 它适用于那些需要监控ZNode子节点变化，并在变化发生时执行特定操作的场景。
+ */
 trait ZNodeChildChangeHandler {
   val path: String
+
+  // mark ZNode的子节点发生变化时被调用。
   def handleChildChange(): Unit = {}
 }
 

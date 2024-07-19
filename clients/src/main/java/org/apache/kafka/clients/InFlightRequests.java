@@ -26,13 +26,16 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * The set of requests which have been sent or are being sent but haven't yet received a response
+ * 这里定义了一个用于收集已发送或正在发送但尚未收到响应的请求集合
  */
 final class InFlightRequests {
 
+    // mark 这个配置规定了已发送或正在发送但尚未收到响应的请求集合数量
     private final int maxInFlightRequestsPerConnection;
+    // mark 存储请求示例（key为目的地IP地址 value为双端队列）
     private final Map<String, Deque<NetworkClient.InFlightRequest>> requests = new HashMap<>();
     /** Thread safe total number of in flight requests. */
+    // mark 使用原子类计算当前的请求数量
     private final AtomicInteger inFlightRequestCount = new AtomicInteger(0);
 
     public InFlightRequests(int maxInFlightRequestsPerConnection) {
@@ -40,21 +43,32 @@ final class InFlightRequests {
     }
 
     /**
-     * Add the given request to the queue for the connection it was directed to
+     * 将给定的请求添加到InFlight
+     *
+     * @param request 要添加的请求对象
      */
     public void add(NetworkClient.InFlightRequest request) {
+        // mark 获取连接的目标地址
         String destination = request.destination;
+        // mark 根据地址获取双端队列
         Deque<NetworkClient.InFlightRequest> reqs = this.requests.get(destination);
+        //noinspection Java8MapApi
         if (reqs == null) {
             reqs = new ArrayDeque<>();
             this.requests.put(destination, reqs);
         }
+        // mark 添加到双端队列头部
         reqs.addFirst(request);
+        // mark 计数+1
         inFlightRequestCount.incrementAndGet();
     }
 
     /**
-     * Get the request queue for the given node
+     * 获取给定节点的请求队列。
+     *
+     * @param node 节点的标识符
+     * @return 给定节点的请求队列
+     * @throws IllegalStateException 如果节点的请求队列为空
      */
     private Deque<NetworkClient.InFlightRequest> requestQueue(String node) {
         Deque<NetworkClient.InFlightRequest> reqs = requests.get(node);
@@ -64,26 +78,35 @@ final class InFlightRequests {
     }
 
     /**
-     * Get the oldest request (the one that will be completed next) for the given node
+     * 获取给定节点的最早请求（即将完成的下一个请求）。
+     *
+     * @param node 节点的标识符
+     * @return 给定节点的最早请求对象
      */
     public NetworkClient.InFlightRequest completeNext(String node) {
+        // mark 从队尾获取request
         NetworkClient.InFlightRequest inFlightRequest = requestQueue(node).pollLast();
+        // mark 计数-1
         inFlightRequestCount.decrementAndGet();
         return inFlightRequest;
     }
 
     /**
-     * Get the last request we sent to the given node (but don't remove it from the queue)
-     * @param node The node id
+     * 获取我们发送到给定节点的最后一个请求（但不从队列中移除它）。
+     *
+     * @param node 节点的标识符
+     * @return 最后一个发送到给定节点的请求对象
      */
     public NetworkClient.InFlightRequest lastSent(String node) {
+        // mark 获取队首的request
         return requestQueue(node).peekFirst();
     }
 
     /**
-     * Complete the last request that was sent to a particular node.
-     * @param node The node the request was sent to
-     * @return The request
+     * 完成发送到特定节点的最后一个请求。
+     *
+     * @param node 请求发送的节点
+     * @return 完成的请求对象
      */
     public NetworkClient.InFlightRequest completeLastSent(String node) {
         NetworkClient.InFlightRequest inFlightRequest = requestQueue(node).pollFirst();
@@ -92,13 +115,17 @@ final class InFlightRequests {
     }
 
     /**
-     * Can we send more requests to this node?
+     * 我们是否可以向此节点发送更多请求？
      *
-     * @param node Node in question
-     * @return true iff we have no requests still being sent to the given node
+     * @param node 相关节点
+     * @return 如果我们没有仍在发送到指定节点的请求，则返回true
      */
     public boolean canSendMore(String node) {
+        // mark 根据节点获取队列
         Deque<NetworkClient.InFlightRequest> queue = requests.get(node);
+        // mark 判断条件
+        // mark 1. 队列为空
+        // mark 2. 队列不为空，且队首的request已经完成，并且队列的大小小于最大允许的请求数量
         return queue == null || queue.isEmpty() ||
                (queue.peekFirst().send.completed() && queue.size() < this.maxInFlightRequestsPerConnection);
     }
@@ -140,10 +167,10 @@ final class InFlightRequests {
     }
 
     /**
-     * Clear out all the in-flight requests for the given node and return them
+     * 清除给定节点的所有正在进行中的请求并返回它们。
      *
-     * @param node The node
-     * @return All the in-flight requests for that node that have been removed
+     * @param node 节点
+     * @return 已移除的该节点的所有正在进行中的请求
      */
     public Iterable<NetworkClient.InFlightRequest> clearAll(String node) {
         Deque<NetworkClient.InFlightRequest> reqs = requests.get(node);
@@ -152,6 +179,7 @@ final class InFlightRequests {
         } else {
             final Deque<NetworkClient.InFlightRequest> clearedRequests = requests.remove(node);
             inFlightRequestCount.getAndAdd(-clearedRequests.size());
+            //noinspection Convert2MethodRef
             return () -> clearedRequests.descendingIterator();
         }
     }

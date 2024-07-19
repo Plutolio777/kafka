@@ -19,7 +19,7 @@ package org.apache.kafka.common.feature;
 import java.util.Map;
 
 /**
- * An extended {@link BaseVersionRange} representing the min/max versions for a supported feature.
+ * 扩展的 {@link BaseVersionRange} 表示受支持功能的最小/最大版本。
  */
 public class SupportedVersionRange extends BaseVersionRange {
     // Label for the min version key, that's used only to convert to/from a map.
@@ -43,12 +43,12 @@ public class SupportedVersionRange extends BaseVersionRange {
     }
 
     /**
-     * Checks if the version level does *NOT* fall within the [min, max] range of this SupportedVersionRange.
+     * 检查版本级别是否*不*在此 SupportedVersionRange 的 [min, max] 范围内。
      *
-     * @param version   the version to be checked
+     * @param version   要检查的版本
      *
-     * @return  - true, if the version levels are incompatible
-     *          - false otherwise
+     * @return  - true，如果版本级别不兼容
+     *          - false，否则
      */
     public boolean isIncompatibleWith(short version) {
         return min() > version || max() < version;

@@ -84,10 +84,24 @@ abstract class ShutdownableThread(val name: String, val isInterruptible: Boolean
   }
 
   /**
-   * This method is repeatedly invoked until the thread shuts down or this method throws an exception
+   * 该方法会被重复调用，直到线程关闭或者该方法抛出异常
    */
   def doWork(): Unit
 
+
+  /**
+   * 启动运行方法，设置 isStarted 为 true，并记录日志 "Starting"。
+   *
+   * 在运行过程中，若 isRunning 为 true，则持续调用 doWork() 方法。
+   * 捕获以下异常：
+   *  - FatalExitError 异常：
+   *    - 触发 shutdownInitiated 和 shutdownComplete 计数减一。
+   *    - 记录日志 "Stopped"。
+   *    - 调用 Exit.exit(e.statusCode()) 退出。
+   *  - 其他 Throwable 异常：
+   *    - 若 isRunning 为 true，记录错误日志。
+   *      最后，确保 shutdownComplete 计数减一，并记录日志 "Stopped"。
+   */
   override def run(): Unit = {
     isStarted = true
     info("Starting")

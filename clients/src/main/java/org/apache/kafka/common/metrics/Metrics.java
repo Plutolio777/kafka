@@ -44,38 +44,52 @@ import java.util.concurrent.TimeUnit;
 import static java.util.Collections.emptyList;
 
 /**
- * A registry of sensors and metrics.
+ * 传感器和指标的注册表。
  * <p>
- * A metric is a named, numerical measurement. A sensor is a handle to record numerical measurements as they occur. Each
- * Sensor has zero or more associated metrics. For example a Sensor might represent message sizes and we might associate
- * with this sensor a metric for the average, maximum, or other statistics computed off the sequence of message sizes
- * that are recorded by the sensor.
+ * 指标是具名的数值测量。传感器是记录数值测量事件发生的句柄。每个传感器可以关联零个或多个指标。例如，一个传感器可以表示消息大小，
+ * 我们可以为该传感器关联平均值、最大值或其他统计数据的指标，这些统计数据是基于传感器记录的消息大小序列计算得出的。
  * <p>
- * Usage looks something like this:
- * 
+ * 使用方法如下：
+ *
  * <pre>
- * // set up metrics:
- * Metrics metrics = new Metrics(); // this is the global repository of metrics and sensors
- * Sensor sensor = metrics.sensor(&quot;message-sizes&quot;);
- * MetricName metricName = new MetricName(&quot;message-size-avg&quot;, &quot;producer-metrics&quot;);
+ * // 设置指标：
+ * Metrics metrics = new Metrics(); // 这是全局的指标和传感器存储库
+ * Sensor sensor = metrics.sensor("message-sizes");
+ * MetricName metricName = new MetricName("message-size-avg", "producer-metrics");
  * sensor.add(metricName, new Avg());
- * metricName = new MetricName(&quot;message-size-max&quot;, &quot;producer-metrics&quot;);
+ * metricName = new MetricName("message-size-max", "producer-metrics");
  * sensor.add(metricName, new Max());
- * 
- * // as messages are sent we record the sizes
+ *
+ * // 随着消息发送，记录消息大小
  * sensor.record(messageSize);
  * </pre>
  */
 public class Metrics implements Closeable {
 
+    // mark 保存metric配置的实例，用于配置metric的行为和属性
     private final MetricConfig config;
+
+    // mark 用于存储所有的指标实例
     private final ConcurrentMap<MetricName, KafkaMetric> metrics;
+
+    // mark 存储所有的Sensor
     private final ConcurrentMap<String, Sensor> sensors;
+
+    // 用于存储传感器的子传感器列表的并发映射，一个sensor可以有多个子sensor，这个映射用于管理这些关系
     private final ConcurrentMap<Sensor, List<Sensor>> childrenSensors;
+
+    // 保存所有metrics reporter的列表，Metrics reporter负责将收集到的metrics报告给指定的reporting目标
     private final List<MetricsReporter> reporters;
+
+    // 提供时间操作的抽象，用于metrics中需要时间操作的地方
     private final Time time;
+
+    // 用于调度metrics任务的线程池执行器，它负责按照预定的时间间隔执行metrics的收集和报告任务
     private final ScheduledThreadPoolExecutor metricsScheduler;
+
+    // 日志记录器实例，用于记录Metrics类的操作日志
     private static final Logger log = LoggerFactory.getLogger(Metrics.class);
+
 
     /**
      * Create a metrics repository with no metric reporters and default configuration.
@@ -156,22 +170,34 @@ public class Metrics implements Closeable {
      */
     public Metrics(MetricConfig defaultConfig, List<MetricsReporter> reporters, Time time, boolean enableExpiration,
                    MetricsContext metricsContext) {
+        // mark 默认指标配置
         this.config = defaultConfig;
+        // mark 存储所有的Sensor
         this.sensors = new ConcurrentHashMap<>();
+        // mark 存储所有的指标
         this.metrics = new ConcurrentHashMap<>();
+        // mark 存储所有的子Sensor
         this.childrenSensors = new ConcurrentHashMap<>();
+        // mark 存储所有的指标报告器
         this.reporters = Objects.requireNonNull(reporters);
+        // mark 时间工具类
         this.time = time;
+
+        // mark 重新改变指标报告器的上下文以及进行初始化
         for (MetricsReporter reporter : reporters) {
             reporter.contextChange(metricsContext);
             reporter.init(new ArrayList<>());
         }
 
         // Create the ThreadPoolExecutor only if expiration of Sensors is enabled.
+
         if (enableExpiration) {
+            // mark 床架指标处理调度线程池
             this.metricsScheduler = new ScheduledThreadPoolExecutor(1);
             // Creating a daemon thread to not block shutdown
+            // mark 配置线程工厂
             this.metricsScheduler.setThreadFactory(runnable -> KafkaThread.daemon("SensorExpiryThread", runnable));
+            // mark 添加过去Sensor处理任务
             this.metricsScheduler.scheduleAtFixedRate(new ExpireSensorTask(), 30, 30, TimeUnit.SECONDS);
         } else {
             this.metricsScheduler = null;
@@ -182,13 +208,13 @@ public class Metrics implements Closeable {
     }
 
     /**
-     * Create a MetricName with the given name, group, description and tags, plus default tags specified in the metric
-     * configuration. Tag in tags takes precedence if the same tag key is specified in the default metric configuration.
+     * 使用给定的名称、组名、描述和标签创建一个 MetricName，同时包含指标配置中指定的默认标签。
+     * 如果在默认指标配置和提供的标签中有相同的标签键，则以提供的标签为准。
      *
-     * @param name        The name of the metric
-     * @param group       logical group name of the metrics to which this metric belongs
-     * @param description A human-readable description to include in the metric
-     * @param tags        additional key/value attributes of the metric
+     * @param name 指标的名称
+     * @param group 指标所属的逻辑组名称
+     * @param description 指标的人类可读描述
+     * @param tags 指标的额外键值属性
      */
     public MetricName metricName(String name, String group, String description, Map<String, String> tags) {
         Map<String, String> combinedTag = new LinkedHashMap<>(config.tags());
@@ -197,47 +223,46 @@ public class Metrics implements Closeable {
     }
 
     /**
-     * Create a MetricName with the given name, group, description, and default tags
-     * specified in the metric configuration.
+     * 使用给定的名称、组名、描述和指标配置中指定的默认标签创建一个 MetricName。
      *
-     * @param name        The name of the metric
-     * @param group       logical group name of the metrics to which this metric belongs
-     * @param description A human-readable description to include in the metric
+     * @param name 指标的名称
+     * @param group 指标所属的逻辑组名称
+     * @param description 指标的人类可读描述
      */
     public MetricName metricName(String name, String group, String description) {
         return metricName(name, group, description, new HashMap<>());
     }
 
     /**
-     * Create a MetricName with the given name, group and default tags specified in the metric configuration.
+     * 使用给定的名称、组名以及指标配置中指定的默认标签创建一个 MetricName。
      *
-     * @param name        The name of the metric
-     * @param group       logical group name of the metrics to which this metric belongs
+     * @param name 指标的名称
+     * @param group 指标所属的逻辑组名称
      */
     public MetricName metricName(String name, String group) {
         return metricName(name, group, "", new HashMap<>());
     }
 
     /**
-     * Create a MetricName with the given name, group, description, and keyValue as tags,  plus default tags specified in the metric
-     * configuration. Tag in keyValue takes precedence if the same tag key is specified in the default metric configuration.
+     * 使用给定的名称、组名、描述以及键值对作为标签创建一个 MetricName，同时包含指标配置中指定的默认标签。
+     * 如果在默认指标配置和提供的标签中有相同的标签键，则以提供的标签为准。
      *
-     * @param name          The name of the metric
-     * @param group         logical group name of the metrics to which this metric belongs
-     * @param description   A human-readable description to include in the metric
-     * @param keyValue      additional key/value attributes of the metric (must come in pairs)
+     * @param name 指标的名称
+     * @param group 指标所属的逻辑组名称
+     * @param description 指标的人类可读描述
+     * @param keyValue 指标的额外键值属性（必须成对出现）
      */
     public MetricName metricName(String name, String group, String description, String... keyValue) {
         return metricName(name, group, description, MetricsUtils.getTags(keyValue));
     }
 
     /**
-     * Create a MetricName with the given name, group and tags, plus default tags specified in the metric
-     * configuration. Tag in tags takes precedence if the same tag key is specified in the default metric configuration.
+     * 使用给定的名称、组名和标签创建一个 MetricName，同时包含指标配置中指定的默认标签。
+     * 如果在默认指标配置和提供的标签中有相同的标签键，则以提供的标签为准。
      *
-     * @param name  The name of the metric
-     * @param group logical group name of the metrics to which this metric belongs
-     * @param tags  key/value attributes of the metric
+     * @param name 指标的名称
+     * @param group 指标所属的逻辑组名称
+     * @param tags 指标的键值属性
      */
     public MetricName metricName(String name, String group, Map<String, String> tags) {
         return metricName(name, group, "", tags);
@@ -397,21 +422,24 @@ public class Metrics implements Closeable {
     }
 
     /**
-     * Get or create a sensor with the given unique name and zero or more parent sensors. All parent sensors will
-     * receive every value recorded with this sensor.
-     * @param name The name of the sensor
-     * @param config A default configuration to use for this sensor for metrics that don't have their own config
-     * @param inactiveSensorExpirationTimeSeconds If no value if recorded on the Sensor for this duration of time,
-     *                                        it is eligible for removal
-     * @param parents The parent sensors
-     * @param recordingLevel The recording level.
-     * @return The sensor that is created
+     * 获取或创建一个具有给定唯一名称和零个或多个父传感器的传感器。所有父传感器将接收此传感器记录的每个值。
+     *
+     * @param name 传感器的名称
+     * @param config 用于此传感器的默认配置，对于没有自己配置的指标
+     * @param inactiveSensorExpirationTimeSeconds 如果在此传感器上未记录任何值的持续时间，则它有资格被移除
+     * @param parents 父传感器列表
+     * @param recordingLevel 记录级别
+     * @return 创建的传感器对象
      */
     public synchronized Sensor sensor(String name, MetricConfig config, long inactiveSensorExpirationTimeSeconds, Sensor.RecordingLevel recordingLevel, Sensor... parents) {
+        // mark 尝试获取已经存在的sensor
         Sensor s = getSensor(name);
         if (s == null) {
+            // mark 创建一个新的sensor
             s = new Sensor(this, name, parents, config == null ? this.config : config, time, inactiveSensorExpirationTimeSeconds, recordingLevel);
+            // mark 注册sensor
             this.sensors.put(name, s);
+            // mark 如果父传感器不为空则继续添加到字Sensor注册表
             if (parents != null) {
                 for (Sensor parent : parents) {
                     List<Sensor> children = childrenSensors.computeIfAbsent(parent, k -> new ArrayList<>());
@@ -438,33 +466,43 @@ public class Metrics implements Closeable {
     }
 
     /**
-     * Remove a sensor (if it exists), associated metrics and its children.
+     * 删除指定的传感器（如果存在），以及与之相关的指标和子传感器。
+     * 如果该传感器不存在，则不执行任何操作。
      *
-     * @param name The name of the sensor to be removed
+     * @param name 要删除的传感器的名称。
      */
     public void removeSensor(String name) {
+        // mark 获取传感器实例
         Sensor sensor = sensors.get(name);
         if (sensor != null) {
+            // 同步处理以确保线程安全
             List<Sensor> childSensors = null;
             synchronized (sensor) {
                 synchronized (this) {
+                    // mark 从传感器集合中移除传感器
                     if (sensors.remove(name, sensor)) {
+                        // mark 移除与传感器关联的所有指标
                         for (KafkaMetric metric : sensor.metrics())
                             removeMetric(metric.metricName());
+                        // mark 记录日志，指示已移除的传感器名称
                         log.trace("Removed sensor with name {}", name);
+                        // mark 从子传感器集合中移除当前传感器的子传感器
                         childSensors = childrenSensors.remove(sensor);
+                        // mark 遍历并更新父传感器的子传感器列表
                         for (final Sensor parent : sensor.parents()) {
                             childrenSensors.getOrDefault(parent, emptyList()).remove(sensor);
                         }
                     }
                 }
             }
+            // mark 递归移除子传感器
             if (childSensors != null) {
                 for (Sensor childSensor : childSensors)
                     removeSensor(childSensor.name());
             }
         }
     }
+
 
     /**
      * Add a metric to monitor an object that implements measurable. This metric won't be associated with any sensor.
@@ -492,25 +530,28 @@ public class Metrics implements Closeable {
      * @param measurable The measurable that will be measured by this metric
      */
     public void addMetric(MetricName metricName, MetricConfig config, Measurable measurable) {
+        // mark 这里会把Measurable转换成MetricValueProvider
         addMetric(metricName, config, (MetricValueProvider<?>) measurable);
     }
 
     /**
-     * Add a metric to monitor an object that implements MetricValueProvider. This metric won't be associated with any
-     * sensor. This is a way to expose existing values as metrics. User is expected to add any additional
-     * synchronization to update and access metric values, if required.
+     * 将一个实现了 MetricValueProvider 接口的对象添加为监视的指标。此指标不会与任何传感器关联。
+     * 这是一种将现有值作为指标公开的方式。如果需要，用户应添加任何额外的同步来更新和访问指标值。
      *
-     * @param metricName The name of the metric
-     * @param metricValueProvider The metric value provider associated with this metric
-     * @throws IllegalArgumentException if a metric with same name already exists.
+     * @param metricName 指标的名称
+     * @param metricValueProvider 与此指标关联的指标值提供者
+     * @throws IllegalArgumentException 如果同名的指标已经存在
      */
     public void addMetric(MetricName metricName, MetricConfig config, MetricValueProvider<?> metricValueProvider) {
+        // mark 创建KafkaMetric
         KafkaMetric m = new KafkaMetric(new Object(),
                                         Objects.requireNonNull(metricName),
                                         Objects.requireNonNull(metricValueProvider),
                                         config == null ? this.config : config,
                                         time);
+        // mark 注册指标
         KafkaMetric existingMetric = registerMetric(m);
+        // mark 指标重复注册的时候抛出异常
         if (existingMetric != null) {
             throw new IllegalArgumentException("A metric named '" + metricName + "' already exists, can't register another one.");
         }
@@ -588,19 +629,21 @@ public class Metrics implements Closeable {
     }
 
     /**
-     * Register a metric if not present or return the already existing metric with the same name.
-     * When a metric is newly registered, this method returns null
+     * 注册一个指标，如果不存在则注册，如果已存在则返回具有相同名称的已存在指标。
+     * 当一个指标被新注册时，该方法返回 null。
      *
-     * @param metric The KafkaMetric to register
-     * @return the existing metric with the same name or null
+     * @param metric 要注册的 KafkaMetric
+     * @return 具有相同名称的已存在指标或 null
      */
     synchronized KafkaMetric registerMetric(KafkaMetric metric) {
+        // mark 将MetricName作为key注册到map中
         MetricName metricName = metric.metricName();
         KafkaMetric existingMetric = this.metrics.putIfAbsent(metricName, metric);
         if (existingMetric != null) {
             return existingMetric;
         }
         // newly added metric
+        // mark 指标报告器中通知并注册指标
         for (MetricsReporter reporter : reporters) {
             try {
                 reporter.metricChange(metric);
@@ -628,29 +671,26 @@ public class Metrics implements Closeable {
     }
 
     /**
-     * This iterates over every Sensor and triggers a removeSensor if it has expired
-     * Package private for testing
+     * ExpireSensorTask 类实现了 Runnable 接口，其职责是检查并移除已过期的传感器。
+     * 此类为包私有，主要用于测试目的。
      */
     class ExpireSensorTask implements Runnable {
         @Override
         public void run() {
+            // mark 遍历传感器映射，检查每个传感器是否已过期
             for (Map.Entry<String, Sensor> sensorEntry : sensors.entrySet()) {
-                // removeSensor also locks the sensor object. This is fine because synchronized is reentrant
-                // There is however a minor race condition here. Assume we have a parent sensor P and child sensor C.
-                // Calling record on C would cause a record on P as well.
-                // So expiration time for P == expiration time for C. If the record on P happens via C just after P is removed,
-                // that will cause C to also get removed.
-                // Since the expiration time is typically high it is not expected to be a significant concern
-                // and thus not necessary to optimize
+                // mark 对传感器对象进行同步，以确保在检查和移除传感器时的线程安全
                 synchronized (sensorEntry.getValue()) {
+                    // mark 如果传感器已过期，记录信息并移除传感器
                     if (sensorEntry.getValue().hasExpired()) {
-                        log.debug("Removing expired sensor {}", sensorEntry.getKey());
+                        log.debug("移除已过期的传感器 {}", sensorEntry.getKey());
                         removeSensor(sensorEntry.getKey());
                     }
                 }
             }
         }
     }
+
 
     /* For testing use only. */
     Map<Sensor, List<Sensor>> childrenSensors() {

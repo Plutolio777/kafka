@@ -65,10 +65,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 /**
- * A network client for asynchronous request/response network i/o. This is an internal class used to implement the
- * user-facing producer and consumer clients.
- * <p>
- * This class is not thread-safe!
+ * 用于异步请求/响应网络 I/O 的网络客户端。这是一个内部类，用于实现面向用户的生产者和消费者客户端。
+ * 注意：这个类不是线程安全的！
  */
 public class NetworkClient implements KafkaClient {
 
@@ -80,41 +78,41 @@ public class NetworkClient implements KafkaClient {
 
     private final Logger log;
 
-    /* the selector used to perform network i/o */
+    /* 用于执行网络 i/o 的选择器 */
     private final Selectable selector;
 
     private final MetadataUpdater metadataUpdater;
 
     private final Random randOffset;
 
-    /* the state of each node's connection */
+    /* 各个节点的连接状态 */
     private final ClusterConnectionStates connectionStates;
 
-    /* the set of requests currently being sent or awaiting a response */
+    /* 当前正在发送或等待响应的请求集 */
     private final InFlightRequests inFlightRequests;
 
-    /* the socket send buffer size in bytes */
+    /* 套接字发送缓冲区大小（以字节为单位） */
     private final int socketSendBuffer;
 
-    /* the socket receive size buffer in bytes */
+    /* 套接字接收缓冲区大小（以字节为单位） */
     private final int socketReceiveBuffer;
 
-    /* the client id used to identify this client in requests to the server */
+    /* 用于在向服务器发出请求时识别该客户端的客户端 ID */
     private final String clientId;
 
-    /* the current correlation id to use when sending requests to servers */
+    /* 向服务器发送请求时使用的当前相关 ID */
     private int correlation;
 
-    /* default timeout for individual requests to await acknowledgement from servers */
+    /* 单个请求等待服务器确认的默认超时 */
     private final int defaultRequestTimeoutMs;
 
-    /* time in ms to wait before retrying to create connection to a server */
+    /* 重试创建与服务器的连接之前等待的时间（以毫秒为单位） */
     private final long reconnectBackoffMs;
 
     private final Time time;
 
     /**
-     * True if we should send an ApiVersionRequest when first connecting to a broker.
+     * 如果我们在第一次连接到代理时应该发送 ApiVersionRequest，则为 true。
      */
     private final boolean discoverBrokerVersions;
 
@@ -263,10 +261,13 @@ public class NetworkClient implements KafkaClient {
         }
         this.selector = selector;
         this.clientId = clientId;
+        // mark 更具最大InFight请求配置生成 InFlightRequests 请求队列
         this.inFlightRequests = new InFlightRequests(maxInFlightRequestsPerConnection);
+        // mark 初始化连接状态缓存
         this.connectionStates = new ClusterConnectionStates(
                 reconnectBackoffMs, reconnectBackoffMax,
                 connectionSetupTimeoutMs, connectionSetupTimeoutMaxMs, logContext, hostResolver);
+        // mark socket buffer缓存区大小
         this.socketSendBuffer = socketSendBuffer;
         this.socketReceiveBuffer = socketReceiveBuffer;
         this.correlation = 0;
@@ -282,22 +283,28 @@ public class NetworkClient implements KafkaClient {
     }
 
     /**
-     * Begin connecting to the given node, return true if we are already connected and ready to send to that node.
+     * 开始连接到指定的节点。如果已经连接并准备好发送数据到该节点，则返回 true。
      *
-     * @param node The node to check
-     * @param now The current timestamp
-     * @return True if we are ready to send to the given node
+     * @param node 要检查的节点。
+     * @param now 当前时间戳（以毫秒为单位）。
+     * @return 如果已准备好向指定节点发送数据，则返回 true，否则返回 false。
+     *
+     * @throws IllegalArgumentException 如果提供的节点为空，则抛出此异常。
      */
     @Override
     public boolean ready(Node node, long now) {
         if (node.isEmpty())
             throw new IllegalArgumentException("Cannot connect to empty node " + node);
 
+        // mark 如果准备完毕则返回true
         if (isReady(node, now))
             return true;
 
+        // mark 如果节点满足连接条件则初始化链接
+        // mark 1.连接状态列表还没有记录这个节点信息 所以默认是可以连接
+        // mark 2.如果连接状态为不可连接但是 等待时间超过了重连延时则可以尝试重新连接
         if (connectionStates.canConnect(node.idString(), now))
-            // if we are interested in sending to a node and we don't have a connection to it, initiate one
+            // 如果我们有兴趣发送到一个节点并且我们没有到它的连接，则启动一个
             initiateConnect(node, now);
 
         return false;
@@ -440,20 +447,24 @@ public class NetworkClient implements KafkaClient {
     }
 
     /**
-     * Are we connected and ready and able to send more requests to the given connection?
+     * 我们是否已连接并准备好并能够向给定连接发送更多请求？
      *
-     * @param node The node
-     * @param now the current timestamp
+     * @param node 节点
+     * @param now 当前时间戳
      */
     private boolean canSendRequest(String node, long now) {
+        // mark 可以发送请求的条件
+        // mark 1.节点连接状态正常
+        // mark 2.通道已准备好
+        // mark 3.通道内请求数未达到限制
         return connectionStates.isReady(node, now) && selector.isChannelReady(node) &&
             inFlightRequests.canSendMore(node);
     }
 
     /**
-     * Queue up the given request for sending. Requests can only be sent out to ready nodes.
-     * @param request The request
-     * @param now The current timestamp
+     * 将给定的发送请求排队。请求只能发送到就绪节点。
+     * @param request 请求
+     * @param now 当前时间戳
      */
     @Override
     public void send(ClientRequest request, long now) {
@@ -467,8 +478,11 @@ public class NetworkClient implements KafkaClient {
     }
 
     private void doSend(ClientRequest clientRequest, boolean isInternalRequest, long now) {
+        // mark 检查客户端是否就绪
         ensureActive();
+        // mark 获取请求的目的地址（节点ID）
         String nodeId = clientRequest.destination();
+
         if (!isInternalRequest) {
             // If this request came from outside the NetworkClient, validate
             // that we can send data.  If the request is internal, we trust
@@ -979,35 +993,39 @@ public class NetworkClient implements KafkaClient {
     }
 
     /**
-     * Initiate a connection to the given node
-     * @param node the node to connect to
-     * @param now current time in epoch milliseconds
+     * 启动到指定节点的连接 （只是调用socket发送个连接请求并将自己的channel注册到selector中 然后将兴趣键设置成0） 就结束了
+     * @param node 要连接的节点
+     * @param now 当前时间（纪元毫秒）
      */
     private void initiateConnect(Node node, long now) {
         String nodeConnectionId = node.idString();
         try {
+            // mark 先把节点标记为正在连接中
             connectionStates.connecting(nodeConnectionId, now, node.host());
+            // mark 获取节点的IP地址
             InetAddress address = connectionStates.currentAddress(nodeConnectionId);
             log.debug("Initiating connection to node {} using address {}", node, address);
+            // mark 使用选择器进行连接
             selector.connect(nodeConnectionId,
                     new InetSocketAddress(address, node.port()),
                     this.socketSendBuffer,
                     this.socketReceiveBuffer);
+            // mark 连接失败处理
         } catch (IOException e) {
             log.warn("Error connecting to node {}", node, e);
-            // Attempt failed, we'll try again after the backoff
+            // mark 尝试失败，我们会在退避后重试
             connectionStates.disconnected(nodeConnectionId, now);
-            // Notify metadata updater of the connection failure
+            // 通知元数据更新器连接失败
             metadataUpdater.handleServerDisconnect(now, nodeConnectionId, Optional.empty());
         }
     }
 
     class DefaultMetadataUpdater implements MetadataUpdater {
 
-        /* the current cluster metadata */
+        /* 当前集群元数据 */
         private final Metadata metadata;
 
-        // Defined if there is a request in progress, null otherwise
+        // 如果有请求正在进行，则定义，否则为 null
         private InProgressData inProgress;
 
         DefaultMetadataUpdater(Metadata metadata) {
@@ -1191,14 +1209,31 @@ public class NetworkClient implements KafkaClient {
     }
 
     // visible for testing
+    @SuppressWarnings("NumericOverflow")
     int nextCorrelationId() {
+        // mark 2147483640 - 2147483647 这几个关联ID是未Sasl客户端保留的 所以如果在这个范围得跳过
         if (SaslClientAuthenticator.isReserved(correlation)) {
-            // the numeric overflow is fine as negative values is acceptable
+            // 数字溢出没有问题，因为负值是可以接受的
             correlation = SaslClientAuthenticator.MAX_RESERVED_CORRELATION_ID + 1;
         }
+        // mark 自增生成关联ID
         return correlation++;
     }
 
+    /**
+     * 创建一个新的客户端请求对象。
+     * <p>
+     * 此方法用于初始化一个客户端请求，该请求将被发送到指定的节点。它封装了请求的细节，如请求构建器、创建时间、是否期望响应等，
+     * 为客户端请求的发送提供了一种抽象和简化的方式。
+     *
+     * @param nodeId           目标节点的ID，表示请求将被发送到哪个节点。
+     * @param requestBuilder   请求的构建器，用于实际构建请求对象。抽象类型Builder<?>确保了灵活性，可以构建任何类型的请求。
+     * @param createdTimeMs    请求创建的时间戳（以毫秒为单位），用于跟踪请求的生命周期和性能分析。
+     * @param expectResponse   表示是否期望从目标节点收到响应。如果为true，则客户端会等待并处理来自服务器的响应。
+     * @param requestTimeoutMs 请求的超时时间（以毫秒为单位），超过这个时间如果没有收到响应，则认为请求失败。
+     * @param callback         请求完成后的回调处理函数，用于异步处理请求的结果或错误。
+     * @return 返回一个新的ClientRequest对象，封装了所有的请求细节和配置。
+     */
     @Override
     public ClientRequest newClientRequest(String nodeId,
                                           AbstractRequest.Builder<?> requestBuilder,
@@ -1206,10 +1241,10 @@ public class NetworkClient implements KafkaClient {
                                           boolean expectResponse,
                                           int requestTimeoutMs,
                                           RequestCompletionHandler callback) {
+        // 使用提供的参数和一些内部逻辑（如生成序列号）创建并返回一个新的ClientRequest实例。
         return new ClientRequest(nodeId, requestBuilder, nextCorrelationId(), clientId, createdTimeMs, expectResponse,
                 requestTimeoutMs, callback);
     }
-
     public boolean discoverBrokerVersions() {
         return discoverBrokerVersions;
     }

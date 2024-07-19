@@ -24,171 +24,164 @@ import java.io.Closeable;
 import java.util.List;
 
 /**
- * The interface for {@link NetworkClient}
+ * {@link NetworkClient} 的接口
  */
 public interface KafkaClient extends Closeable {
 
     /**
-     * Check if we are currently ready to send another request to the given node but don't attempt to connect if we
-     * aren't.
+     * 检查当前是否准备好向指定节点发送另一个请求，但如果未准备好则不尝试连接。
      *
-     * @param node The node to check
-     * @param now The current timestamp
+     * @param node 要检查的节点
+     * @param now 当前时间戳
+     * @return 如果准备好发送请求，则返回 true；否则返回 false
      */
     boolean isReady(Node node, long now);
 
     /**
-     * Initiate a connection to the given node (if necessary), and return true if already connected. The readiness of a
-     * node will change only when poll is invoked.
+     * 向指定节点发起连接（如果需要），并在已连接的情况下返回 true。节点的准备状态仅在调用 poll 时才会改变。
      *
-     * @param node The node to connect to.
-     * @param now The current time
-     * @return true iff we are ready to immediately initiate the sending of another request to the given node.
+     * @param node 要连接的节点
+     * @param now 当前时间
+     * @return 如果立即准备好向指定节点发送另一个请求，则返回 true
      */
     boolean ready(Node node, long now);
 
     /**
-     * Return the number of milliseconds to wait, based on the connection state, before attempting to send data. When
-     * disconnected, this respects the reconnect backoff time. When connecting or connected, this handles slow/stalled
-     * connections.
+     * 根据连接状态返回等待的毫秒数，以在尝试发送数据之前。断开连接时，会尊重重新连接的退避时间。连接或已连接时，这会处理慢/停滞的连接。
      *
-     * @param node The node to check
-     * @param now The current timestamp
-     * @return The number of milliseconds to wait.
+     * @param node 要检查的节点
+     * @param now 当前时间戳
+     * @return 要等待的毫秒数
      */
     long connectionDelay(Node node, long now);
 
     /**
-     * Return the number of milliseconds to wait, based on the connection state and the throttle time, before
-     * attempting to send data. If the connection has been established but being throttled, return throttle delay.
-     * Otherwise, return connection delay.
+     * 根据连接状态和节流时间返回等待的毫秒数，以在尝试发送数据之前。如果连接已建立但正在被节流，则返回节流延迟。否则，返回连接延迟。
      *
-     * @param node the connection to check
-     * @param now the current time in ms
+     * @param node 要检查的连接
+     * @param now 当前时间（以毫秒为单位）
+     * @return 要等待的毫秒数
      */
     long pollDelayMs(Node node, long now);
 
     /**
-     * Check if the connection of the node has failed, based on the connection state. Such connection failure are
-     * usually transient and can be resumed in the next {@link #ready(org.apache.kafka.common.Node, long)} }
-     * call, but there are cases where transient failures needs to be caught and re-acted upon.
+     * 根据连接状态检查节点的连接是否失败。这种连接失败通常是短暂的，可以在下一次 {@link #ready(org.apache.kafka.common.Node, long)} 调用中恢复，但有些情况下需要捕捉和处理这些短暂的失败。
      *
-     * @param node the node to check
-     * @return true iff the connection has failed and the node is disconnected
+     * @param node 要检查的节点
+     * @return 如果连接失败且节点断开连接，则返回 true
      */
     boolean connectionFailed(Node node);
 
     /**
-     * Check if authentication to this node has failed, based on the connection state. Authentication failures are
-     * propagated without any retries.
+     * 根据连接状态检查此节点的身份验证是否失败。身份验证失败不会进行任何重试。
      *
-     * @param node the node to check
-     * @return an AuthenticationException iff authentication has failed, null otherwise
+     * @param node 要检查的节点
+     * @return 如果身份验证失败，则返回 AuthenticationException，否则返回 null
      */
     AuthenticationException authenticationException(Node node);
 
     /**
-     * Queue up the given request for sending. Requests can only be sent on ready connections.
-     * @param request The request
-     * @param now The current timestamp
+     * 将给定请求排队等待发送。请求只能在准备好的连接上发送。
+     *
+     * @param request 请求
+     * @param now 当前时间戳
      */
     void send(ClientRequest request, long now);
 
     /**
-     * Do actual reads and writes from sockets.
+     * 从套接字中实际进行读写操作。
      *
-     * @param timeout The maximum amount of time to wait for responses in ms, must be non-negative. The implementation
-     *                is free to use a lower value if appropriate (common reasons for this are a lower request or
-     *                metadata update timeout)
-     * @param now The current time in ms
-     * @throws IllegalStateException If a request is sent to an unready node
+     * @param timeout 响应的最大等待时间（以毫秒为单位），必须是非负数。如果合适，实施可以使用更低的值（常见原因包括较低的请求或元数据更新超时）
+     * @param now 当前时间（以毫秒为单位）
+     * @throws IllegalStateException 如果请求被发送到未准备好的节点
      */
     List<ClientResponse> poll(long timeout, long now);
 
     /**
-     * Disconnects the connection to a particular node, if there is one.
-     * Any pending ClientRequests for this connection will receive disconnections.
+     * 断开与特定节点的连接（如果存在）。
+     * 对于此连接的任何挂起的 ClientRequests 将收到断开连接的通知。
      *
-     * @param nodeId The id of the node
+     * @param nodeId 节点的 ID
      */
     void disconnect(String nodeId);
 
     /**
-     * Closes the connection to a particular node (if there is one).
-     * All requests on the connection will be cleared.  ClientRequest callbacks will not be invoked
-     * for the cleared requests, nor will they be returned from poll().
+     * 关闭与特定节点的连接（如果存在）。
+     * 所有请求都将被清除。对于已清除的请求，不会调用 ClientRequest 回调，也不会从 poll() 中返回。
      *
-     * @param nodeId The id of the node
+     * @param nodeId 节点的 ID
      */
     void close(String nodeId);
 
     /**
-     * Choose the node with the fewest outstanding requests. This method will prefer a node with an existing connection,
-     * but will potentially choose a node for which we don't yet have a connection if all existing connections are in
-     * use.
+     * 选择拥有最少未完成请求的节点。此方法会优先选择已有连接的节点，但如果所有现有连接都在使用中，可能会选择尚未建立连接的节点。
      *
-     * @param now The current time in ms
-     * @return The node with the fewest in-flight requests.
+     * @param now 当前时间（以毫秒为单位）
+     * @return 拥有最少未完成请求的节点
      */
     Node leastLoadedNode(long now);
 
     /**
-     * The number of currently in-flight requests for which we have not yet returned a response
+     * 当前尚未返回响应的未完成请求的数量
      */
     int inFlightRequestCount();
 
     /**
-     * Return true if there is at least one in-flight request and false otherwise.
+     * 如果至少有一个未完成的请求，则返回 true；否则返回 false。
      */
     boolean hasInFlightRequests();
 
     /**
-     * Get the total in-flight requests for a particular node
+     * 获取特定节点的总未完成请求数量
      *
-     * @param nodeId The id of the node
+     * @param nodeId 节点的 ID
+     * @return 特定节点的未完成请求数量
      */
     int inFlightRequestCount(String nodeId);
 
     /**
-     * Return true if there is at least one in-flight request for a particular node and false otherwise.
+     * 如果特定节点有至少一个未完成的请求，则返回 true；否则返回 false。
+     *
+     * @param nodeId 节点的 ID
+     * @return 如果节点有未完成请求，则返回 true
      */
     boolean hasInFlightRequests(String nodeId);
 
     /**
-     * Return true if there is at least one node with connection in the READY state and not throttled. Returns false
-     * otherwise.
+     * 如果至少有一个连接状态为 READY 且未被节流的节点，则返回 true；否则返回 false。
      *
-     * @param now the current time
+     * @param now 当前时间
+     * @return 如果存在 READY 状态且未被节流的节点，则返回 true
      */
     boolean hasReadyNodes(long now);
 
     /**
-     * Wake up the client if it is currently blocked waiting for I/O
+     * 如果客户端当前因等待 I/O 而被阻塞，则唤醒客户端
      */
     void wakeup();
 
     /**
-     * Create a new ClientRequest.
+     * 创建一个新的 ClientRequest。
      *
-     * @param nodeId the node to send to
-     * @param requestBuilder the request builder to use
-     * @param createdTimeMs the time in milliseconds to use as the creation time of the request
-     * @param expectResponse true iff we expect a response
+     * @param nodeId 发送目标节点的 ID
+     * @param requestBuilder 用于构建请求的构建器
+     * @param createdTimeMs 用作请求创建时间的时间（以毫秒为单位）
+     * @param expectResponse 如果期望响应，则为 true
+     * @return 新创建的 ClientRequest
      */
     ClientRequest newClientRequest(String nodeId, AbstractRequest.Builder<?> requestBuilder,
                                    long createdTimeMs, boolean expectResponse);
 
     /**
-     * Create a new ClientRequest.
+     * 创建一个新的 ClientRequest。
      *
-     * @param nodeId the node to send to
-     * @param requestBuilder the request builder to use
-     * @param createdTimeMs the time in milliseconds to use as the creation time of the request
-     * @param expectResponse true iff we expect a response
-     * @param requestTimeoutMs Upper bound time in milliseconds to await a response before disconnecting the socket and
-     *                         cancelling the request. The request may get cancelled sooner if the socket disconnects
-     *                         for any reason including if another pending request to the same node timed out first.
-     * @param callback the callback to invoke when we get a response
+     * @param nodeId 发送目标节点的 ID
+     * @param requestBuilder 用于构建请求的构建器
+     * @param createdTimeMs 用作请求创建时间的时间（以毫秒为单位）
+     * @param expectResponse 如果期望响应，则为 true
+     * @param requestTimeoutMs 等待响应的最大时间（以毫秒为单位），在断开套接字和取消请求之前。请求可能会在套接字因任何原因断开连接之前被取消，包括如果对同一节点的另一个挂起请求首先超时。
+     * @param callback 响应到达时调用的回调
+     * @return 新创建的 ClientRequest
      */
     ClientRequest newClientRequest(String nodeId,
                                    AbstractRequest.Builder<?> requestBuilder,
@@ -197,19 +190,13 @@ public interface KafkaClient extends Closeable {
                                    int requestTimeoutMs,
                                    RequestCompletionHandler callback);
 
-
-
     /**
-     * Initiates shutdown of this client. This method may be invoked from another thread while this
-     * client is being polled. No further requests may be sent using the client. The current poll()
-     * will be terminated using wakeup(). The client should be explicitly shutdown using {@link #close()}
-     * after poll returns. Note that {@link #close()} should not be invoked concurrently while polling.
+     * 发起客户端的关闭操作。此方法可以在客户端被轮询时从其他线程调用。无法使用客户端发送进一步的请求。当前的 poll() 将使用 wakeup() 终止。应在 poll 返回后显式关闭客户端，使用 {@link #close()}。请注意，在轮询时不应同时调用 {@link #close()}。
      */
     void initiateClose();
 
     /**
-     * Returns true if the client is still active. Returns false if {@link #initiateClose()} or {@link #close()}
-     * was invoked for this client.
+     * 如果客户端仍然活跃，则返回 true。如果已调用 {@link #initiateClose()} 或 {@link #close()}，则返回 false。
      */
     boolean active();
 

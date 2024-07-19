@@ -36,7 +36,10 @@ import java.util.function.Supplier;
 
 public class PlaintextChannelBuilder implements ChannelBuilder {
     private static final Logger log = LoggerFactory.getLogger(PlaintextChannelBuilder.class);
+
+    // mark 监听器名称
     private final ListenerName listenerName;
+    // mark 配置
     private Map<String, ?> configs;
 
     /**

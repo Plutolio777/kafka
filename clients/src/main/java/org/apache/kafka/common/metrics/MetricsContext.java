@@ -21,24 +21,21 @@ import org.apache.kafka.common.annotation.InterfaceStability;
 import java.util.Map;
 
 /**
- * MetricsContext encapsulates additional contextLabels about metrics exposed via a
- * {@link org.apache.kafka.common.metrics.MetricsReporter}
+ * MetricsContext 封装了通过 {@link org.apache.kafka.common.metrics.MetricsReporter} 暴露的指标的附加上下文标签信息。
  *
- * <p>The {@link #contextLabels()} map provides following information:
+ * <p>{@link #contextLabels()} 映射提供以下信息：
  * <dl>
- *   <dt>in all components</dt>
- *   <dd>a {@code _namespace} field indicating the component exposing metrics
- *   e.g. kafka.server, kafka.consumer.
- *   The {@link JmxReporter} uses this as prefix for MBean names</dd>
+ *   <dt>在所有组件中</dt>
+ *   <dd>一个 {@code _namespace} 字段，指示暴露指标的组件，例如 kafka.server、kafka.consumer。
+ *   {@link JmxReporter} 使用这个字段作为 MBean 名称的前缀。</dd>
  *
- *   <dt>for clients and streams libraries</dt>
- *   <dd>any freeform fields passed in via
- *   client properties in the form of {@code metrics.context.<key>=<value>}</dd>
+ *   <dt>对于clients和streams</dt>
+ *   <dd>通过客户端属性以 {@code metrics.context.<key>=<value>} 的形式传递的任意自由形式字段。</dd>
  *
- *   <dt>for kafka brokers</dt>
+ *   <dt>对于 Kafka Broker</dt>
  *   <dd>kafka.broker.id, kafka.cluster.id</dd>
  *
- *   <dt>for connect workers</dt>
+ *   <dt>对于 Connect Workers</dt>
  *   <dd>connect.kafka.cluster.id, connect.group.id</dd>
  * </dl>
  */

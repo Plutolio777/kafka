@@ -78,6 +78,7 @@ object DynamicBrokerConfig {
 
   private[server] val DynamicSecurityConfigs = SslConfigs.RECONFIGURABLE_CONFIGS.asScala
 
+  // mark 所有可以动态更改的配置都在这里
   val AllDynamicConfigs = DynamicSecurityConfigs ++
     LogCleaner.ReconfigurableConfigs ++
     DynamicLogConfig.ReconfigurableConfigs ++
@@ -155,34 +156,69 @@ object DynamicBrokerConfig {
     configNames.intersect(PerBrokerConfigs) ++ configNames.filter(perBrokerListenerConfig)
   }
 
+  /**
+   * mark 获取非动态配置的属性名集合。
+   *
+   * @param props Properties对象，包含所有的配置项。
+   * @return 返回一个Set集合，包含非动态配置的属性名。
+   */
   private def nonDynamicConfigs(props: Properties): Set[String] = {
     // mark 返回props和 DynamicConfig.Broker.nonDynamicProps的交集
     props.asScala.keySet.intersect(DynamicConfig.Broker.nonDynamicProps)
   }
 
+
   private def securityConfigsWithoutListenerPrefix(props: Properties): Set[String] = {
     DynamicSecurityConfigs.filter(props.containsKey)
   }
 
+  /**
+   * mark 验证所有的动态配置项的类型是否符合要求。
+   * 此函数的目的是对传入的配置属性进行检查，确保它们符合动态配置的预期类型。
+   * 它通过匹配特定的键模式（ListenerConfigRegex）来提取基本名称，并将这些配置项以及其它不匹配的配置项
+   * 放入一个新的Properties对象中，然后对该新对象进行类型验证。
+   *
+   * @param props 原始的配置属性对象，可能包含多种类型的配置项。
+   */
   private def validateConfigTypes(props: Properties): Unit = {
+    // 创建一个新的Properties对象用于存储经过筛选的配置项
     val baseProps = new Properties
+    // 遍历原始配置属性，对匹配ListenerConfigRegex的键提取基本名称，并存储到baseProps中，
+    // 对于不匹配的键值对，直接存储到baseProps中。
     props.asScala.foreach {
       // mark 如果键匹配 `ListenerConfigRegex` 正则表达式，则提取基本名称并放入 baseProps。
       case (ListenerConfigRegex(baseName), v) => baseProps.put(baseName, v)
       case (k, v) => baseProps.put(k, v)
     }
+    // 使用DynamicConfig的Broker实例对baseProps进行类型验证
     DynamicConfig.Broker.validate(baseProps)
   }
 
+
+  /**
+   * mark 将可以动态添加的配置定义添加到给定的配置定义中
+   *
+   * 此方法遍历KafkaConfig中的所有配置项，并检查哪些配置项是动态配置。如果配置项是动态配置，
+   * 则将其添加到ConfigDef中。这样做是为了在运行时能够动态地更新这些特定的配置项，
+   * 而不需要重启服务器。
+   *
+   * @param configDef 配置定义的对象，用于定义和管理配置项。
+   */
   private[server] def addDynamicConfigs(configDef: ConfigDef): Unit = {
+    // 遍历KafkaConfig中的所有配置项
+    // mark KafkaConfig.configKeys 里面是所有的配置定义
     KafkaConfig.configKeys.forKeyValue { (configName, config) =>
+      // 检查当前配置项是否是动态配置
+      // mark AllDynamicConfigs是动态配置定义
       if (AllDynamicConfigs.contains(configName)) {
+        // 如果是动态配置，则在ConfigDef中定义这个配置项
         configDef.define(config.name, config.`type`, config.defaultValue, config.validator,
           config.importance, config.documentation, config.group, config.orderInGroup, config.width,
           config.displayName, config.dependents, config.recommender)
       }
     }
   }
+
 
   private[server] def dynamicConfigUpdateModes: util.Map[String, String] = {
     AllDynamicConfigs.map { name =>
@@ -222,14 +258,18 @@ object DynamicBrokerConfig {
 }
 
 class DynamicBrokerConfig(private val kafkaConfig: KafkaConfig) extends Logging {
-
+  // mark 静态Broker配置
   private[server] val staticBrokerConfigs = ConfigDef.convertToStringMapWithPasswordValues(kafkaConfig.originalsFromThisConfig).asScala
+  // mark 静态集群默认配置
   private[server] val staticDefaultConfigs = ConfigDef.convertToStringMapWithPasswordValues(KafkaConfig.defaultValues.asJava).asScala
+  // mark 动态Broker配置
   private val dynamicBrokerConfigs = mutable.Map[String, String]()
+  // mark 动态集群默认配置
   private val dynamicDefaultConfigs = mutable.Map[String, String]()
 
   // Use COWArrayList to prevent concurrent modification exception when an item is added by one thread to these
   // collections, while another thread is iterating over them.
+  // mark 用于保存可重新配置的对象
   private[server] val reconfigurables = new CopyOnWriteArrayList[Reconfigurable]()
   private val brokerReconfigurables = new CopyOnWriteArrayList[BrokerReconfigurable]()
   private val lock = new ReentrantReadWriteLock
@@ -241,16 +281,16 @@ class DynamicBrokerConfig(private val kafkaConfig: KafkaConfig) extends Logging 
   }
 
   /**
-   * 初始化方法。
+   * mark 动态Broker配置初始化方法。
    *
    * @param zkClientOpt 可选的 KafkaZkClient 实例，用于与 ZooKeeper 进行交互。
    */
   private[server] def initialize(zkClientOpt: Option[KafkaZkClient]): Unit = {
-    // mark kafkaConfig.props为配置文件中的初始配置 这里用重新生成KafkaConfig?
+    // mark kafkaConfig.props为配置文件中的初始配置 server.proerties
     currentConfig = new KafkaConfig(kafkaConfig.props, false, None)
 
     zkClientOpt.foreach { zkClient =>
-      // 创建 AdminZkClient 实例
+      // mark 创建 AdminZkClient 实例
       val adminZkClient = new AdminZkClient(zkClient)
       // mark  cluster-wide 类型的参数更新
       // mark 从kafka拉取配置并更新 路径为 /config/brokers/<default> 拉取配置（如果不存在节点则返回空Properties）
@@ -347,11 +387,7 @@ class DynamicBrokerConfig(private val kafkaConfig: KafkaConfig) extends Logging 
   }
 
   /**
-   * 更新默认配置
-   * 该方法使用写锁来确保对默认配置的安全更新。
-   * 它尝试将持久化属性转换为普通属性，并更新动态默认配置。
-   * 如果启用了日志记录，则会记录配置更新的操作。
-   * 如果更新过程中发生异常，则记录错误信息。
+   * mark 更新集群层面的默认配置
    *
    * @param persistentProps 需要更新的配置Properties
    * @param doLog           是否记录日志，默认值为 true
@@ -433,11 +469,11 @@ class DynamicBrokerConfig(private val kafkaConfig: KafkaConfig) extends Logging 
   private[server] def fromPersistentProps(persistentProps: Properties, perBrokerConfig: Boolean): Properties = {
     val props = persistentProps.clone().asInstanceOf[Properties]
 
-    // 移除 `props` 中所有无效的配置项
+    // mark 移除 `props` 中所有无效的配置项 perBrokerConfig为true表示broker 为false表示cluster
     removeInvalidConfigs(props, perBrokerConfig)
 
     /**
-     * 移除无效的属性。
+     * mark 移除无效的属性。
      *
      * 本函数用于从一个集合中移除指定的无效属性名，并记录一个错误信息。如果传入的无效属性名集合不为空，
      * 则遍历该集合，从一个名为`props`的存储结构中移除这些属性。同时，使用传入的错误信息和移除的属性名
@@ -537,27 +573,43 @@ class DynamicBrokerConfig(private val kafkaConfig: KafkaConfig) extends Logging 
     processReconfiguration(newProps, validateOnly = true)
   }
 
+  /**
+   * mark 验证并且移除无效的配置项。
+   *
+   * 此方法尝试验证给定配置项的有效性。如果验证失败，它将识别并移除导致验证失败的配置项。
+   * 这对于确保配置的正确性和系统的稳定性至关重要。
+   *
+   * @param props           配置项的集合，可能包含无效的配置项。
+   * @param perBrokerConfig 指示这些配置项是否针对每个Broker，用于提供更具体的错误上下文信息。
+   */
   private def removeInvalidConfigs(props: Properties, perBrokerConfig: Boolean): Unit = {
     try {
+      // mark 先整体验证一遍 如果报错则再每个属性一次过一遍
       validateConfigTypes(props)
+      // 如果验证成功，无需进一步处理，直接返回Scala映射视图。
       props.asScala
     } catch {
       case e: Exception =>
+        // mark 筛选出导致验证失败的配置项。
         val invalidProps = props.asScala.filter { case (k, v) =>
           val props1 = new Properties
           props1.put(k, v)
           try {
             validateConfigTypes(props1)
-            false
+            false // mark 验证成功，此项不是无效配置。
           } catch {
-            case _: Exception => true
+            case _: Exception => true // mark 验证失败，此项是无效配置。 从props中移除
           }
         }
+        // mark 从原始配置中移除无效配置项。
         invalidProps.keys.foreach(props.remove)
+        // 根据perBrokerConfig参数确定配置源的类型。
         val configSource = if (perBrokerConfig) "broker" else "default cluster"
+        // 记录移除无效配置项的日志，包括哪些配置项被移除以及相关的异常信息。
         error(s"Dynamic $configSource config contains invalid values in: ${invalidProps.keys}, these configs will be ignored", e)
     }
   }
+
 
   private[server] def maybeReconfigure(reconfigurable: Reconfigurable, oldConfig: KafkaConfig, newConfig: util.Map[String, _]): Unit = {
     if (reconfigurable.reconfigurableConfigs.asScala.exists(key => oldConfig.originals.get(key) != newConfig.get(key)))
