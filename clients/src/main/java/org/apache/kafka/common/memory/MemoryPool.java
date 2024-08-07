@@ -24,6 +24,7 @@ import java.nio.ByteBuffer;
  * Every buffer returned from {@link #tryAllocate(int)} must always be {@link #release(ByteBuffer) released}.
  */
 public interface MemoryPool {
+
     MemoryPool NONE = new MemoryPool() {
         @Override
         public ByteBuffer tryAllocate(int sizeBytes) {

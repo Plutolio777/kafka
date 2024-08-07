@@ -508,7 +508,7 @@ object KafkaConfig {
   val BackgroundThreadsProp = "background.threads"
   val NumReplicaAlterLogDirsThreadsProp = "num.replica.alter.log.dirs.threads"
   /**
-   * <p>broker.id</p>
+   * <p>queued.max.requests</p>
    * <p>用于控制在处理请求之前，I/O 线程允许的最大请求队列数量。这个参数对管理 Kafka broker 的内存使用和性能有重要影响。</p>
    * <p>默认值 500</p>
    */

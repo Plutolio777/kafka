@@ -53,8 +53,11 @@ import java.util.HashSet;
 public class SslFactory implements Reconfigurable, Closeable {
     private static final Logger log = LoggerFactory.getLogger(SslFactory.class);
 
+    // mark 服务器客户端标识
     private final Mode mode;
+    //
     private final String clientAuthConfigOverride;
+    //
     private final boolean keystoreVerifiableUsingTruststore;
     private String endpointIdentification;
     private SslEngineFactory sslEngineFactory;
@@ -87,13 +90,16 @@ public class SslFactory implements Reconfigurable, Closeable {
         if (sslEngineFactory != null) {
             throw new IllegalStateException("SslFactory was already configured.");
         }
+        // mark 从配置中提取 ssl.endpoint.identification.algorithm
         this.endpointIdentification = (String) configs.get(SslConfigs.SSL_ENDPOINT_IDENTIFICATION_ALGORITHM_CONFIG);
 
+        // mark 从配置中提取 ssl.client.auth
         // The input map must be a mutable RecordingMap in production.
         Map<String, Object> nextConfigs = (Map<String, Object>) configs;
         if (clientAuthConfigOverride != null) {
             nextConfigs.put(BrokerSecurityConfigs.SSL_CLIENT_AUTH_CONFIG, clientAuthConfigOverride);
         }
+        // mark 生成ssl引擎工厂
         SslEngineFactory builder = instantiateSslEngineFactory(nextConfigs);
         if (keystoreVerifiableUsingTruststore) {
             try {
@@ -127,16 +133,29 @@ public class SslFactory implements Reconfigurable, Closeable {
         }
     }
 
+    /**
+     * 根据配置信息实例化SslEngineFactory。
+     * 此方法用于根据提供的配置映射来决定是否使用默认的SslEngineFactory实例，
+     * 或是根据配置中的类名来实例化一个自定义的SslEngineFactory。无论哪种情况，
+     * 实例化的SslEngineFactory都会根据配置信息进行配置。
+     *
+     * @param configs 配置映射，可能包含SslEngineFactory的类名以及其他相关配置。
+     * @return 实例化的SslEngineFactory对象。
+     */
     private SslEngineFactory instantiateSslEngineFactory(Map<String, Object> configs) {
         @SuppressWarnings("unchecked")
+        // mark  读取配置中的 ssl.engine.factory.class并生成实例
         Class<? extends SslEngineFactory> sslEngineFactoryClass =
                 (Class<? extends SslEngineFactory>) configs.get(SslConfigs.SSL_ENGINE_FACTORY_CLASS_CONFIG);
+        // mark 优先使用用户自定义生成器 默认为 DefaultSslEngineFactory
+        // mark 引擎工厂内部会根据用户定义的SSL相关的配置构造SSLContext 用于生成SSL殷勤
         SslEngineFactory sslEngineFactory;
         if (sslEngineFactoryClass == null) {
             sslEngineFactory = new DefaultSslEngineFactory();
         } else {
             sslEngineFactory = Utils.newInstance(sslEngineFactoryClass);
         }
+        // mark 配置ssl引擎工厂 [[DefaultSslEngineFactory.configure]]
         sslEngineFactory.configure(configs);
         this.sslEngineFactoryConfig = configs;
         return sslEngineFactory;
@@ -190,8 +209,8 @@ public class SslFactory implements Reconfigurable, Closeable {
     }
 
     /**
-     * Prefer `createSslEngine(Socket)` if a `Socket` instance is available. If using this overload,
-     * avoid reverse DNS resolution in the computation of `peerHost`.
+     * 如果 `Socket` 实例可用，则首选 `createSslEngine(Socket)`。如果使用此重载，
+     * 在`peerHost`的计算中避免反向DNS解析。
      */
     public SSLEngine createSslEngine(String peerHost, int peerPort) {
         if (sslEngineFactory == null) {
@@ -355,9 +374,9 @@ public class SslFactory implements Reconfigurable, Closeable {
     }
 
     /**
-     * Validator used to verify dynamic update of keystore used in inter-broker communication.
-     * The validator checks that a successful handshake can be performed using the keystore and
-     * truststore configured on this SslFactory.
+     * 验证器用于验证代理间通信中使用的密钥库的动态更新。
+     * 验证器检查是否可以使用密钥库执行成功的握手，并且
+     * 在此 SslFactory 上配置的信任库。
      */
     private static class SslEngineValidator {
         private static final ByteBuffer EMPTY_BUF = ByteBuffer.allocate(0);

@@ -20,11 +20,9 @@ package org.apache.kafka.common.protocol;
 import java.util.IdentityHashMap;
 
 /**
- * The ObjectSerializationCache stores sizes and values computed during the
- * first serialization pass.  This avoids recalculating and recomputing the same
- * values during the second pass.
- *
- * It is intended to be used as part of a two-pass serialization process like:
+ * ObjectSerializationCache 存储在第一次序列化过程中计算的大小和值。
+ * 这可以避免在第二次序列化过程中重新计算相同的值。
+ * 它旨在作为两次序列化过程的一部分使用，例如：
  * ObjectSerializationCache cache = new ObjectSerializationCache();
  * message.size(version, cache);
  * message.write(version, cache);

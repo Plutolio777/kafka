@@ -16,13 +16,7 @@
  */
 package org.apache.kafka.common.network;
 
-/*
- * 底层通信的传输层。
- * 在非常基础的层面上，它是 SocketChannel 的包装器，可以用作 SocketChannel 的替代品
- * 和其他网络通道实现。
- * 随着 NetworkClient 取代 BlockingChannel 和其他实现，我们将使用 KafkaChannel 作为
- * 一个网络I/O通道。
- */
+
 import org.apache.kafka.common.errors.AuthenticationException;
 
 import java.io.IOException;
@@ -31,6 +25,13 @@ import java.nio.channels.SelectionKey;
 import java.nio.channels.SocketChannel;
 import java.security.Principal;
 
+/**
+ * 底层通信的传输层。
+ * 在非常基础的层面上，它是 SocketChannel 的包装器，可以用作 SocketChannel 的替代品
+ * 和其他网络通道实现。
+ * 随着 NetworkClient 取代 BlockingChannel 和其他实现，我们将使用 KafkaChannel 作为
+ * 一个网络I/O通道。
+ */
 public interface TransportLayer extends ScatteringByteChannel, TransferableChannel {
 
     /**

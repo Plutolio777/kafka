@@ -27,22 +27,31 @@ import org.apache.kafka.common.protocol.SendBuilder;
 import java.nio.ByteBuffer;
 import java.util.Map;
 
+
+/**
+ * 保存了 kafka请求最基本的信息 APIkey 和版本
+ * 以及提供了一些基本的发送方法
+ */
 public abstract class AbstractRequest implements AbstractRequestResponse {
 
+    /**
+     * kafka请求数据的基本构建器 它保存了一个小希请求最基本的数据 比如apikey 版本号
+     * 所有的builder方法都是由子类去实现
+     */
     public static abstract class Builder<T extends AbstractRequest> {
         private final ApiKeys apiKey;
         private final short oldestAllowedVersion;
         private final short latestAllowedVersion;
 
         /**
-         * Construct a new builder which allows any supported version
+         * 构建一个新的构建器，允许任何支持的版本
          */
         public Builder(ApiKeys apiKey) {
             this(apiKey, apiKey.oldestVersion(), apiKey.latestVersion());
         }
 
         /**
-         * Construct a new builder which allows only a specific version
+         * 构建一个仅允许特定版本的新构建器
          */
         public Builder(ApiKeys apiKey, short allowedVersion) {
             this(apiKey, allowedVersion, allowedVersion);
@@ -97,6 +106,10 @@ public abstract class AbstractRequest implements AbstractRequestResponse {
         return apiKey;
     }
 
+
+    /**
+     * 根据请求头和请求体构建发送实例的方法
+     */
     public final Send toSend(RequestHeader header) {
         return SendBuilder.buildRequestSend(header, data());
     }

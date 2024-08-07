@@ -82,33 +82,52 @@ public class MultiRecordsSend implements Send {
         return count;
     }
 
+    /**
+     * 将当前请求数据写入给定的传输通道。
+     * 如果请求已经完成，将抛出异常。
+     *
+     * @param channel 要写入数据的通道。
+     * @return 此次调用中写入的总字节数。
+     * @throws IOException    在写入操作期间发生I/O错误时抛出。
+     * @throws KafkaException 当在已完成的请求上执行此操作时抛出。
+     */
     @Override
     public long writeTo(TransferableChannel channel) throws IOException {
+        // 确保请求未完成，否则抛出异常。
         if (completed())
-            throw new KafkaException("This operation cannot be invoked on a complete request.");
+            throw new KafkaException("无法在已完成的请求上执行此操作。");
 
+        // 此次调用中写入的总字节数。
         int totalWrittenPerCall = 0;
+        // 标记指示当前数据块是否已完全写入。
         boolean sendComplete;
         do {
+            // 将当前数据块写入通道，并更新此次调用中写入的总字节数。
             long written = current.writeTo(channel);
             totalWrittenPerCall += written;
+            // 检查当前数据块是否已完全写入。
             sendComplete = current.completed();
+            // 如果当前数据块已完全写入，更新统计信息并准备写入下一个数据块。
             if (sendComplete) {
                 updateRecordConversionStats(current);
                 current = sendQueue.poll();
             }
-        } while (!completed() && sendComplete);
+        } while (!completed() && sendComplete); // 只要请求未完成且有数据可写，就继续写入。
 
+        // 更新自请求开始以来写入的总字节数。
         totalWritten += totalWrittenPerCall;
 
+        // 请求完成后，记录并检查预期总字节数与实际总字节数之间的差异。
         if (completed() && totalWritten != size)
-            log.error("mismatch in sending bytes over socket; expected: {} actual: {}", size, totalWritten);
+            log.error("通过套接字发送的字节不匹配；预期：{} 实际：{}", size, totalWritten);
 
-        log.trace("Bytes written as part of multi-send call: {}, total bytes written so far: {}, expected bytes to write: {}",
+        // 追踪日志记录此次调用中写入的字节数、到目前为止写入的总字节数以及预期的总字节数。
+        log.trace("作为多发送调用的一部分写入的字节数：{}，到目前为止写入的总字节数：{}，预期写入的字节数：{}",
                 totalWrittenPerCall, totalWritten, size);
 
         return totalWrittenPerCall;
     }
+
 
     /**
      * Get any statistics that were recorded as part of executing this {@link MultiRecordsSend}.

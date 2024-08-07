@@ -37,6 +37,7 @@ import javax.net.ssl.SSLProtocolException;
 import javax.net.ssl.SSLSession;
 
 import org.apache.kafka.common.errors.SslAuthenticationException;
+import org.apache.kafka.common.memory.MemoryPool;
 import org.apache.kafka.common.security.auth.KafkaPrincipal;
 import org.apache.kafka.common.utils.ByteUtils;
 import org.apache.kafka.common.utils.LogContext;
@@ -44,36 +45,40 @@ import org.apache.kafka.common.utils.ByteBufferUnmapper;
 import org.apache.kafka.common.utils.Utils;
 import org.slf4j.Logger;
 
-/*
- * Transport layer for SSL communication
+/**
+ * SSL通信的传输层
+ * SSL传输层通道的构建可以参考 {@link SslChannelBuilder#buildChannel}
  *
- *
- * TLS v1.3 notes:
- *   https://tools.ietf.org/html/rfc8446#section-4.6 : Post-Handshake Messages
- *   "TLS also allows other messages to be sent after the main handshake.
- *   These messages use a handshake content type and are encrypted under
- *   the appropriate application traffic key."
+ * TLS v1.3 注释：
+ * https://tools.ietf.org/html/rfc8446#section-4.6：握手后消息
+ *“TLS 还允许在主握手之后发送其他消息。
+ * 这些消息使用握手内容类型并在以下情况下加密
+ * 适当的应用程序流量密钥。”
  */
 public class SslTransportLayer implements TransportLayer {
     private enum State {
-        // Initial state
+        // 初始状态
         NOT_INITIALIZED,
-        // SSLEngine is in handshake mode
+        // SSLEngine 处于握手模式
         HANDSHAKE,
-        // SSL handshake failed, connection will be terminated
+        // SSL握手失败，连接将被终止
         HANDSHAKE_FAILED,
-        // SSLEngine has completed handshake, post-handshake messages may be pending for TLSv1.3
+        // SSLEngine 已完成握手，握手后消息可能正在等待 TLSv1.3
         POST_HANDSHAKE,
-        // SSLEngine has completed handshake, any post-handshake messages have been processed for TLSv1.3
-        // For TLSv1.3, we move the channel to READY state when incoming data is processed after handshake
+        // SSLEngine 已完成握手，任何握手后消息均已针对 TLSv1.3 进行处理
+        // 对于 TLSv1.3，握手后处理传入数据时，我们将通道移至 READY 状态
         READY,
-        // Channel is being closed
+        // 通道正在关闭
         CLOSING
     }
 
     private static final String TLS13 = "TLSv1.3";
 
     private final String channelId;
+
+    /**
+     * SSL引擎的构建过程可以参考 {@link org.apache.kafka.common.security.ssl.DefaultSslEngineFactory#createSslEngine}
+     */
     private final SSLEngine sslEngine;
     private final SelectionKey key;
     private final SocketChannel socketChannel;
@@ -109,23 +114,44 @@ public class SslTransportLayer implements TransportLayer {
         this.log = logContext.logger(getClass());
     }
 
-    // Visible for testing
+    /**
+     * 开始SSL/TLS握手过程。
+     * 此方法初始化SSL引擎所需的缓冲区并启动握手过程。
+     * 它被设计为仅调用一次以确保正确建立SSL连接。
+     * 当状态不是NOT_INITIALIZED时再次调用此方法将抛出IllegalStateException。
+     *
+     * @throws IllegalStateException 如果握手已经发起或SSL引擎处于不适当的状态。
+     * @throws IOException           如果在握手过程中发生I/O错误。
+     */
+    // 为了测试可见
     protected void startHandshake() throws IOException {
+        // 确保仅初始化握手一次。
         if (state != State.NOT_INITIALIZED)
             throw new IllegalStateException("startHandshake() can only be called once, state " + state);
 
+        // 初始化网络读写缓冲区以及应用读缓冲区。
         this.netReadBuffer = ByteBuffer.allocate(netReadBufferSize());
         this.netWriteBuffer = ByteBuffer.allocate(netWriteBufferSize());
         this.appReadBuffer = ByteBuffer.allocate(applicationBufferSize());
+
+        // 设置网络写缓冲区的初始限制为0，表示没有数据要写入。
         netWriteBuffer.limit(0);
         netReadBuffer.limit(0);
 
+        // mark 更新SSL传输层状态为HANDSHAKE。
         state = State.HANDSHAKE;
-        //initiate handshake
+        // mark 启动SSL/TLS握手过程。
         sslEngine.beginHandshake();
+        // mark 获取当前握手状态以确定下一步操作。
         handshakeStatus = sslEngine.getHandshakeStatus();
     }
 
+
+    /**
+     * 检查传输层是否准备好。
+     * 明文传输无需准备
+     * @return 始终返回 {@code true}，指示对象已准备好。
+     */
     @Override
     public boolean ready() {
         return state == State.POST_HANDSHAKE || state == State.READY;
@@ -138,6 +164,7 @@ public class SslTransportLayer implements TransportLayer {
     public boolean finishConnect() throws IOException {
         boolean connected = socketChannel.finishConnect();
         if (connected)
+            // mark 取消关注连接事件 并添加关注读事件
             key.interestOps(key.interestOps() & ~SelectionKey.OP_CONNECT | SelectionKey.OP_READ);
         return connected;
     }
@@ -219,22 +246,22 @@ public class SslTransportLayer implements TransportLayer {
         return netWriteBuffer.hasRemaining();
     }
 
+
     /**
-     * Reads available bytes from socket channel to `netReadBuffer`.
-     * Visible for testing.
-     * @return  number of bytes read
+     * 从套接字通道读取可用字节到 netReadBuffer。
+     * @return 读取的字节数
      */
     protected int readFromSocketChannel() throws IOException {
         return socketChannel.read(netReadBuffer);
     }
 
     /**
-    * Flushes the buffer to the network, non blocking.
-    * Visible for testing.
-    * @param buf ByteBuffer
-    * @return boolean true if the buffer has been emptied out, false otherwise
-    * @throws IOException
-    */
+     * 将缓冲区刷新到网络，非阻塞。
+     * 仅用于测试可见。
+     * @param buf ByteBuffer 缓冲区
+     * @return boolean 如果缓冲区已被清空，则返回 true，否则返回 false
+     * @throws IOException 如果发生 I/O 错误
+     */
     protected boolean flush(ByteBuffer buf) throws IOException {
         int remaining = buf.remaining();
         if (remaining > 0) {
@@ -245,39 +272,42 @@ public class SslTransportLayer implements TransportLayer {
     }
 
     /**
-    * Performs SSL handshake, non blocking.
-    * Before application data (kafka protocols) can be sent client & kafka broker must
-    * perform ssl handshake.
-    * During the handshake SSLEngine generates encrypted data that will be transported over socketChannel.
-    * Each SSLEngine operation generates SSLEngineResult , of which SSLEngineResult.handshakeStatus field is used to
-    * determine what operation needs to occur to move handshake along.
-    * A typical handshake might look like this.
-    * +-------------+----------------------------------+-------------+
-    * |  client     |  SSL/TLS message                 | HSStatus    |
-    * +-------------+----------------------------------+-------------+
-    * | wrap()      | ClientHello                      | NEED_UNWRAP |
-    * | unwrap()    | ServerHello/Cert/ServerHelloDone | NEED_WRAP   |
-    * | wrap()      | ClientKeyExchange                | NEED_WRAP   |
-    * | wrap()      | ChangeCipherSpec                 | NEED_WRAP   |
-    * | wrap()      | Finished                         | NEED_UNWRAP |
-    * | unwrap()    | ChangeCipherSpec                 | NEED_UNWRAP |
-    * | unwrap()    | Finished                         | FINISHED    |
-    * +-------------+----------------------------------+-------------+
-    *
-    * @throws IOException if read/write fails
-    * @throws SslAuthenticationException if handshake fails with an {@link SSLException}
-    */
+     * 执行 SSL 握手，非阻塞。网上看到的都是阻塞的，所以这里需要自己实现。
+     * 在发送应用数据（kafka 协议）之前，客户端和 kafka 代理必须执行 SSL 握手。
+     * 在握手过程中，SSLEngine 生成将通过 socketChannel 传输的加密数据。
+     * 每次 SSLEngine 操作都会生成 SSLEngineResult，其中的 SSLEngineResult.handshakeStatus 字段
+     * 用于确定需要执行什么操作来推进握手。
+     * 典型的握手过程可能如下所示。
+     * +-------------+----------------------------------+-------------+
+     * |  客户端      |  SSL/TLS 消息                    | HSStatus    |
+     * +-------------+----------------------------------+-------------+
+     * | wrap()      | ClientHello                      | NEED_UNWRAP |
+     * | unwrap()    | ServerHello/Cert/ServerHelloDone | NEED_WRAP   |
+     * | wrap()      | ClientKeyExchange                | NEED_WRAP   |
+     * | wrap()      | ChangeCipherSpec                 | NEED_WRAP   |
+     * | wrap()      | Finished                         | NEED_UNWRAP |
+     * | unwrap()    | ChangeCipherSpec                 | NEED_UNWRAP |
+     * | unwrap()    | Finished                         | FINISHED    |
+     * +-------------+----------------------------------+-------------+
+     *
+     * @throws IOException 如果读/写失败
+     * @throws SslAuthenticationException 如果握手失败并出现 {@link SSLException}
+     */
     @Override
     public void handshake() throws IOException {
+        // mark 如果传输层状态为未初始化 则执行握手连接（这个地方只会执行一次）
         if (state == State.NOT_INITIALIZED) {
             try {
+                // mark 发起握手 (调用SSLEngine的beginHandshake)
                 startHandshake();
             } catch (SSLException e) {
                 maybeProcessHandshakeFailure(e, false, null);
             }
         }
+        // mark 如果在握手的过程中 通道可用 那就见鬼了 抛出异常
         if (ready())
             throw renegotiationException();
+
         if (state == State.CLOSING)
             throw closingException();
 
@@ -293,9 +323,11 @@ public class SslTransportLayer implements TransportLayer {
             doHandshake();
             if (ready())
                 updateBytesBuffered(true);
-        } catch (SSLException e) {
+        } catch (SSLException e)
+        {
             maybeProcessHandshakeFailure(e, true, null);
-        } catch (IOException e) {
+        } catch (IOException e)
+        {
             maybeThrowSslAuthenticationException();
 
             // This exception could be due to a write. If there is data available to unwrap in the buffer, or data available
@@ -335,43 +367,61 @@ public class SslTransportLayer implements TransportLayer {
         maybeThrowSslAuthenticationException();
 
         switch (handshakeStatus) {
+
             case NEED_TASK:
                 log.trace("SSLHandshake NEED_TASK channelId {}, appReadBuffer pos {}, netReadBuffer pos {}, netWriteBuffer pos {}",
                           channelId, appReadBuffer.position(), netReadBuffer.position(), netWriteBuffer.position());
                 handshakeStatus = runDelegatedTasks();
                 break;
+
+            // mark wrap操作 app buffer -> net buffer socket需要可写事件完备
             case NEED_WRAP:
                 log.trace("SSLHandshake NEED_WRAP channelId {}, appReadBuffer pos {}, netReadBuffer pos {}, netWriteBuffer pos {}",
                           channelId, appReadBuffer.position(), netReadBuffer.position(), netWriteBuffer.position());
                 handshakeResult = handshakeWrap(write);
+                // mark wrap阶段如果出现BUFFER_OVERFLOW说明netWriteBuffer空间不足
                 if (handshakeResult.getStatus() == Status.BUFFER_OVERFLOW) {
                     int currentNetWriteBufferSize = netWriteBufferSize();
+                    // mark 将未读数据往前压缩 保证扩容时不影响未读数据
                     netWriteBuffer.compact();
+                    // mark 对netWriteBuffer进行扩容
                     netWriteBuffer = Utils.ensureCapacity(netWriteBuffer, currentNetWriteBufferSize);
+                    // mark 切换读模式
                     netWriteBuffer.flip();
                     if (netWriteBuffer.limit() >= currentNetWriteBufferSize) {
                         throw new IllegalStateException("Buffer overflow when available data size (" + netWriteBuffer.limit() +
                                                         ") >= network buffer size (" + currentNetWriteBufferSize + ")");
                     }
-                } else if (handshakeResult.getStatus() == Status.BUFFER_UNDERFLOW) {
+                // mark 下面两个状态都是不应该收到
+                }
+                else if (handshakeResult.getStatus() == Status.BUFFER_UNDERFLOW) {
                     throw new IllegalStateException("Should not have received BUFFER_UNDERFLOW during handshake WRAP.");
-                } else if (handshakeResult.getStatus() == Status.CLOSED) {
+                }
+                else if (handshakeResult.getStatus() == Status.CLOSED) {
                     throw new EOFException();
                 }
+
                 log.trace("SSLHandshake NEED_WRAP channelId {}, handshakeResult {}, appReadBuffer pos {}, netReadBuffer pos {}, netWriteBuffer pos {}",
                        channelId, handshakeResult, appReadBuffer.position(), netReadBuffer.position(), netWriteBuffer.position());
-                //if handshake status is not NEED_UNWRAP or unable to flush netWriteBuffer contents
-                //we will break here otherwise we can do need_unwrap in the same call.
+                //如果握手状态不是 NEED_UNWRAP 或无法刷新 netWriteBuffer 内容
+                //我们将在这里中断，否则我们可以在同一个调用中执行 need_unwrap 。
                 if (handshakeStatus != HandshakeStatus.NEED_UNWRAP || !flush(netWriteBuffer)) {
+                    // mark 如果不为unwrap说明后续操作需要继续wrap 调整监听事件为可写事件
                     key.interestOps(key.interestOps() | SelectionKey.OP_WRITE);
                     break;
                 }
+                // mark 这里break 说明如果wrap后跟unwrap操作 可以直接执行向下仅需执行unwrap操作
+
+            // mark unwrap操作 net buffer -> app buffer socket需要可读事件完备
             case NEED_UNWRAP:
                 log.trace("SSLHandshake NEED_UNWRAP channelId {}, appReadBuffer pos {}, netReadBuffer pos {}, netWriteBuffer pos {}",
                           channelId, appReadBuffer.position(), netReadBuffer.position(), netWriteBuffer.position());
                 do {
+
                     handshakeResult = handshakeUnwrap(read, false);
+                    // mark 如果unwrap阶段 出现BUFFER_OVERFLOW 说明app buffer不足 需要扩容
                     if (handshakeResult.getStatus() == Status.BUFFER_OVERFLOW) {
+                        // mark 对app buffer进行扩容
                         int currentAppBufferSize = applicationBufferSize();
                         appReadBuffer = Utils.ensureCapacity(appReadBuffer, currentAppBufferSize);
                         if (appReadBuffer.position() > currentAppBufferSize) {
@@ -380,7 +430,10 @@ public class SslTransportLayer implements TransportLayer {
                         }
                     }
                 } while (handshakeResult.getStatus() == Status.BUFFER_OVERFLOW);
+
+                // mark 理论上只会在unwrap阶段出现BUFFER_UNDERFLOW 要么是半包问题 要么是数据读取不完整
                 if (handshakeResult.getStatus() == Status.BUFFER_UNDERFLOW) {
+                    // mark 这里直接进行扩容 如果是半包问题 (netReadBuffer.position() >= currentNetReadBufferSize) 则直接报错
                     int currentNetReadBufferSize = netReadBufferSize();
                     netReadBuffer = Utils.ensureCapacity(netReadBuffer, currentNetReadBufferSize);
                     if (netReadBuffer.position() >= currentNetReadBufferSize) {
@@ -392,12 +445,15 @@ public class SslTransportLayer implements TransportLayer {
                 log.trace("SSLHandshake NEED_UNWRAP channelId {}, handshakeResult {}, appReadBuffer pos {}, netReadBuffer pos {}, netWriteBuffer pos {}",
                           channelId, handshakeResult, appReadBuffer.position(), netReadBuffer.position(), netWriteBuffer.position());
 
-                //if handshakeStatus completed than fall-through to finished status.
-                //after handshake is finished there is no data left to read/write in socketChannel.
-                //so the selector won't invoke this channel if we don't go through the handshakeFinished here.
+                // mark 如果握手状态已完成，则直接进入完成状态。
+                //握手完成后，socketChannel中没有数据可供读/写。
+                //因此，如果我们不在这里完成握手，选择器将不会调用此通道。
+
                 if (handshakeStatus != HandshakeStatus.FINISHED) {
+                    // mark 如果是NEED_WRAP状态则需要继续监听可写事件
                     if (handshakeStatus == HandshakeStatus.NEED_WRAP) {
                         key.interestOps(key.interestOps() | SelectionKey.OP_WRITE);
+                    // mark 如果是NEED_UNWRAP状态则需要继续监听可读事件
                     } else if (handshakeStatus == HandshakeStatus.NEED_UNWRAP) {
                         key.interestOps(key.interestOps() & ~SelectionKey.OP_WRITE);
                     }
@@ -438,20 +494,21 @@ public class SslTransportLayer implements TransportLayer {
     }
 
     /**
-     * Checks if the handshake status is finished
-     * Sets the interestOps for the selectionKey.
+     * 检查握手状态是否完成
+     * 设置 selectionKey 的 interestOps。
      */
     private void handshakeFinished() throws IOException {
-        // SSLEngine.getHandshakeStatus is transient and it doesn't record FINISHED status properly.
-        // It can move from FINISHED status to NOT_HANDSHAKING after the handshake is completed.
-        // Hence we also need to check handshakeResult.getHandshakeStatus() if the handshake finished or not
+        // SSLEngine.getHandshakeStatus 是暂时的，它不能正确记录 FINISHED 状态。
+        // 握手完成后可以从FINISHED状态转为NOT_HANDSHAKING状态。
+        // 因此我们还需要检查handshakeResult.getHandshakeStatus()是否握手完成
         if (handshakeResult.getHandshakeStatus() == HandshakeStatus.FINISHED) {
-            //we are complete if we have delivered the last packet
-            //remove OP_WRITE if we are complete, otherwise we still have data to write
+            //如果我们已经交付了最后一个数据包，我们就完成了
+            //如果完成则删除OP_WRITE，否则仍有数据要写入
             if (netWriteBuffer.hasRemaining())
                 key.interestOps(key.interestOps() | SelectionKey.OP_WRITE);
             else {
                 SSLSession session = sslEngine.getSession();
+                // mark 如果协议是TLSv1.3 状态POST_HANDSHAKE 将在握手写入数据时转换成READY
                 state = session.getProtocol().equals(TLS13) ? State.POST_HANDSHAKE : State.READY;
                 key.interestOps(key.interestOps() & ~SelectionKey.OP_WRITE);
                 log.debug("SSL handshake completed successfully with peerHost '{}' peerPort {} peerPrincipal '{}' protocol '{}' cipherSuite '{}'",
@@ -468,13 +525,14 @@ public class SslTransportLayer implements TransportLayer {
     }
 
     /**
-    * Performs the WRAP function
-    * @param doWrite boolean
-    * @return SSLEngineResult
-    * @throws IOException
-    */
+     * 执行 WRAP 功能
+     * @param doWrite 布尔值，指示是否进行写操作
+     * @return SSLEngineResult
+     * @throws IOException 如果发生 I/O 错误
+     */
     private SSLEngineResult handshakeWrap(boolean doWrite) throws IOException {
         log.trace("SSLHandshake handshakeWrap {}", channelId);
+
         if (netWriteBuffer.hasRemaining())
             throw new IllegalStateException("handshakeWrap called with netWriteBuffer not empty");
         //this should never be called with a network buffer that contains data
@@ -482,17 +540,20 @@ public class SslTransportLayer implements TransportLayer {
         netWriteBuffer.clear();
         SSLEngineResult result;
         try {
+            // mark 将数据wrap到netWriteBuffer
             result = sslEngine.wrap(ByteUtils.EMPTY_BUF, netWriteBuffer);
         } finally {
             //prepare the results to be written
+            // mark 切换读模式
             netWriteBuffer.flip();
         }
+        // mark 是否需要执行任务
         handshakeStatus = result.getHandshakeStatus();
         if (result.getStatus() == SSLEngineResult.Status.OK &&
             result.getHandshakeStatus() == HandshakeStatus.NEED_TASK) {
             handshakeStatus = runDelegatedTasks();
         }
-
+        // mark 将数据刷到socket buffer中
         if (doWrite) flush(netWriteBuffer);
         return result;
     }
@@ -509,22 +570,33 @@ public class SslTransportLayer implements TransportLayer {
         SSLEngineResult result;
         int read = 0;
         if (doRead)
+            // mark 将数据从socket buffer读取到appReadBuffer
             read = readFromSocketChannel();
         boolean cont;
+
         do {
             //prepare the buffer with the incoming data
+            // mark 保存一下position
             int position = netReadBuffer.position();
+            // mark 切换读模式
             netReadBuffer.flip();
+
+            // mark 将数据从 netReadBuffer 读取到 appReadBuffer
             result = sslEngine.unwrap(netReadBuffer, appReadBuffer);
             netReadBuffer.compact();
             handshakeStatus = result.getHandshakeStatus();
+
+            // mark 执行附加任务
             if (result.getStatus() == SSLEngineResult.Status.OK &&
                 result.getHandshakeStatus() == HandshakeStatus.NEED_TASK) {
                 handshakeStatus = runDelegatedTasks();
             }
+
+            // mark netReadBuffer.position() != position 说明数据还没有读取完需要继续读取
             cont = (result.getStatus() == SSLEngineResult.Status.OK &&
                     handshakeStatus == HandshakeStatus.NEED_UNWRAP) ||
                     (ignoreHandshakeStatus && netReadBuffer.position() != position);
+
             log.trace("SSLHandshake handshakeUnwrap: handshakeStatus {} status {}", handshakeStatus, result.getStatus());
         } while (netReadBuffer.position() != 0 && cont);
 
@@ -538,20 +610,21 @@ public class SslTransportLayer implements TransportLayer {
 
 
     /**
-    * Reads a sequence of bytes from this channel into the given buffer. Reads as much as possible
-    * until either the dst buffer is full or there is no more data in the socket.
-    *
-    * @param dst The buffer into which bytes are to be transferred
-    * @return The number of bytes read, possible zero or -1 if the channel has reached end-of-stream
-    *         and no more data is available
-    * @throws IOException if some other I/O error occurs
-    */
+     * 从该通道读取一系列字节到给定的缓冲区。尽可能多地读取，直到 dst 缓冲区满或者套接字中没有更多数据为止。
+     *
+     * @param dst 要传输字节的缓冲区
+     * @return 读取的字节数，可能为零；如果通道已到达流的末端且没有更多数据可用，则返回 -1
+     * @throws IOException 如果发生其他 I/O 错误
+     */
     @Override
     public int read(ByteBuffer dst) throws IOException {
+        // mark 如果传输层状态为关闭则返回-1
         if (state == State.CLOSING) return -1;
+        // mark 如果传输层未准备完毕则返回0
         else if (!ready()) return 0;
 
         //if we have unread decrypted data in appReadBuffer read that into dst buffer.
+        // mark 将appReadBuffer中的未读数据读入给如的bytebuffer中
         int read = 0;
         if (appReadBuffer.position() > 0) {
             read = readFromAppBuffer(dst);
@@ -560,34 +633,51 @@ public class SslTransportLayer implements TransportLayer {
         boolean readFromNetwork = false;
         boolean isClosed = false;
         // Each loop reads at most once from the socket.
+        // mark 如果dst还能装得下
         while (dst.remaining() > 0) {
             int netread = 0;
+
+            // mark 对netReadBuffer先进行扩容
             netReadBuffer = Utils.ensureCapacity(netReadBuffer, netReadBufferSize());
+
+            // mark 将数据读取到netReadBuffer socket receive buffer --> net read buffer
             if (netReadBuffer.remaining() > 0) {
+                // mark 将加密内容从socket读取到netReadBuffer
                 netread = readFromSocketChannel();
                 if (netread > 0)
+                    // mark 标记为本次从网络中读取了数据
                     readFromNetwork = true;
             }
 
+            // mark position > 0 说明 netReadBuffer 存在新读取的数据
             while (netReadBuffer.position() > 0) {
+                // mark 切换到读模式
                 netReadBuffer.flip();
+
                 SSLEngineResult unwrapResult;
                 try {
+                    // mark 使用ssl engine 将netReadBuffer的加密内容解密到appReadBuffer
+                    // mark net read buffer --解密--> app read buffer
                     unwrapResult = sslEngine.unwrap(netReadBuffer, appReadBuffer);
+
                     if (state == State.POST_HANDSHAKE && appReadBuffer.position() != 0) {
                         // For TLSv1.3, we have finished processing post-handshake messages since we are now processing data
+                        // mark TLSv1.3捂手成功后的状态是 POST_HANDSHAKE 首次接收数据才修改为 READY
                         state = State.READY;
                     }
                 } catch (SSLException e) {
                     // For TLSv1.3, handle SSL exceptions while processing post-handshake messages as authentication exceptions
                     if (state == State.POST_HANDSHAKE) {
+                        // mark 对于TLSv1.3如果握手后首次接收数据失败则表示握手失败
                         state = State.HANDSHAKE_FAILED;
                         throw new SslAuthenticationException("Failed to process post-handshake messages", e);
                     } else
                         throw e;
                 }
+                // mark 删除 net read buffer 已读的部分
                 netReadBuffer.compact();
                 // reject renegotiation if TLS < 1.3, key updates for TLS 1.3 are allowed
+                // mark TLSv1.3以外的版本不支持重新握手协商
                 if (unwrapResult.getHandshakeStatus() != HandshakeStatus.NOT_HANDSHAKING &&
                         unwrapResult.getHandshakeStatus() != HandshakeStatus.FINISHED &&
                         unwrapResult.getStatus() == Status.OK &&
@@ -597,9 +687,10 @@ public class SslTransportLayer implements TransportLayer {
                         appReadBuffer.position(), netReadBuffer.position(), netWriteBuffer.position(), unwrapResult.getHandshakeStatus());
                     throw renegotiationException();
                 }
-
+                // mark 将解密后的内容读取到给定的buffer
                 if (unwrapResult.getStatus() == Status.OK) {
                     read += readFromAppBuffer(dst);
+                // mark 如果加密结果为BUFFER_OVERFLOW 则需要的app read buffer进行扩容
                 } else if (unwrapResult.getStatus() == Status.BUFFER_OVERFLOW) {
                     int currentApplicationBufferSize = applicationBufferSize();
                     appReadBuffer = Utils.ensureCapacity(appReadBuffer, currentApplicationBufferSize);
@@ -608,14 +699,18 @@ public class SslTransportLayer implements TransportLayer {
                                                         ") >= application buffer size (" + currentApplicationBufferSize + ")");
                     }
 
-                    // appReadBuffer will extended upto currentApplicationBufferSize
-                    // we need to read the existing content into dst before we can do unwrap again. If there are no space in dst
-                    // we can break here.
+                    // appReadBuffer 将扩展到 currentApplicationBufferSize
+                    // 我们需要将现有内容读入 dst，然后才能再次展开。如果 dst 中没有空间
+                    // 我们可以在这里中断。
                     if (dst.hasRemaining())
                         read += readFromAppBuffer(dst);
                     else
                         break;
+                // mark 如果加密结果为BUFFER_UNDERFLOW 则需要的net read buffer进行扩容
+                // mark 在unwrap时如果是BUFFER_UNDERFLOW 则说明net read buffer容量不够
+                // mark 对net read buffer扩容 没有改变net read buffer的状态 后面可以继续从socket中读取数据
                 } else if (unwrapResult.getStatus() == Status.BUFFER_UNDERFLOW) {
+                    // mark 扩容 net read buffer
                     int currentNetReadBufferSize = netReadBufferSize();
                     netReadBuffer = Utils.ensureCapacity(netReadBuffer, currentNetReadBufferSize);
                     if (netReadBuffer.position() >= currentNetReadBufferSize) {
@@ -623,6 +718,7 @@ public class SslTransportLayer implements TransportLayer {
                                                         ") > packet buffer size (" + currentNetReadBufferSize + ")");
                     }
                     break;
+                // mark 如果结果为CLOSED 则表示ssl engine关闭
                 } else if (unwrapResult.getStatus() == Status.CLOSED) {
                     // If data has been read and unwrapped, return the data. Close will be handled on the next poll.
                     if (appReadBuffer.position() == 0 && read == 0)
@@ -638,6 +734,7 @@ public class SslTransportLayer implements TransportLayer {
             if (netread <= 0 || isClosed)
                 break;
         }
+        // mark 如果本次读取有从 socket buffer读取数据 或者 read >0 (从app read buffer中读取 或者两者皆有)
         updateBytesBuffered(readFromNetwork || read > 0);
         // If data has been read and unwrapped, return the data even if end-of-stream, channel will be closed
         // on a subsequent poll.
@@ -690,40 +787,54 @@ public class SslTransportLayer implements TransportLayer {
 
 
     /**
-    * Writes a sequence of bytes to this channel from the given buffer.
-    *
-    * @param src The buffer from which bytes are to be retrieved
-    * @return The number of bytes read from src, possibly zero, or -1 if the channel has reached end-of-stream
-    * @throws IOException If some other I/O error occurs
-    */
+     * 从给定的缓冲区向此通道写入一系列字节。
+     *
+     * @param src 要从中检索字节的缓冲区
+     * @return 从 src 中读取的字节数，可能为零，如果通道已到达流末尾，则返回 -1
+     * @throws IOException 如果发生其他 I/O 错误
+     */
     @Override
     public int write(ByteBuffer src) throws IOException {
+
         if (state == State.CLOSING)
             throw closingException();
         if (!ready())
             return 0;
 
         int written = 0;
+
+        // mark 如果将 net write buffer的数据刷到socket buffer成功 并且源buffer中还有内容
         while (flush(netWriteBuffer) && src.hasRemaining()) {
+            // mark 清空 net write buffer
             netWriteBuffer.clear();
+
+            // mark 使用SSL engin 将 src buffer 中的数据加密到 net write buffer中
             SSLEngineResult wrapResult = sslEngine.wrap(src, netWriteBuffer);
+
+            // mark net write buffer 切换读模式
             netWriteBuffer.flip();
 
-            // reject renegotiation if TLS < 1.3, key updates for TLS 1.3 are allowed
+
+            // mark 如果 TLS < 1.3，则拒绝重新协商，允许 TLS 1.3 的密钥更新
             if (wrapResult.getHandshakeStatus() != HandshakeStatus.NOT_HANDSHAKING &&
                     wrapResult.getStatus() == Status.OK &&
                     !sslEngine.getSession().getProtocol().equals(TLS13)) {
                 throw renegotiationException();
             }
 
+            // mark 加密成功
             if (wrapResult.getStatus() == Status.OK) {
                 written += wrapResult.bytesConsumed();
+            // mark 对 net write buffer 进行扩容并重试
             } else if (wrapResult.getStatus() == Status.BUFFER_OVERFLOW) {
                 // BUFFER_OVERFLOW means that the last `wrap` call had no effect, so we expand the buffer and try again
                 netWriteBuffer = Utils.ensureCapacity(netWriteBuffer, netWriteBufferSize());
+
                 netWriteBuffer.position(netWriteBuffer.limit());
+            // mark wrap过程中不存在BUFFER_UNDERFLOW 抛出异常
             } else if (wrapResult.getStatus() == Status.BUFFER_UNDERFLOW) {
                 throw new IllegalStateException("SSL BUFFER_UNDERFLOW during write");
+            // mark 通道关闭抛出异常
             } else if (wrapResult.getStatus() == Status.CLOSED) {
                 throw new EOFException();
             }
@@ -732,32 +843,39 @@ public class SslTransportLayer implements TransportLayer {
     }
 
     /**
-    * Writes a sequence of bytes to this channel from the subsequence of the given buffers.
-    *
-    * @param srcs The buffers from which bytes are to be retrieved
-    * @param offset The offset within the buffer array of the first buffer from which bytes are to be retrieved; must be non-negative and no larger than srcs.length.
-    * @param length - The maximum number of buffers to be accessed; must be non-negative and no larger than srcs.length - offset.
-    * @return returns no.of bytes written , possibly zero.
-    * @throws IOException If some other I/O error occurs
-    */
+     * 从给定缓冲区的子序列向此通道写入一系列字节。
+     *
+     * @param srcs 要从中检索字节的缓冲区
+     * @param offset 缓冲区数组中第一个要检索字节的缓冲区的偏移量；必须是非负数，并且不大于 srcs.length。
+     * @param length 要访问的最大缓冲区数量；必须是非负数，并且不大于 srcs.length - offset。
+     * @return 返回写入的字节数，可能为零。
+     * @throws IOException 如果发生其他 I/O 错误
+     */
     @Override
     public long write(ByteBuffer[] srcs, int offset, int length) throws IOException {
+        // mark 校验参数
         if ((offset < 0) || (length < 0) || (offset > srcs.length - length))
             throw new IndexOutOfBoundsException();
+
         int totalWritten = 0;
         int i = offset;
+        // mark 开始遍历buffer数组
         while (i < length) {
+            // mark 如果src缓冲区存在数据 或者 net write buffer中存在未发送数据 则调用write方法
             if (srcs[i].hasRemaining() || hasPendingWrites()) {
+                // mark 使用SSL引擎将原buffer中的数据刷入socket buffer
                 int written = write(srcs[i]);
                 if (written > 0) {
                     totalWritten += written;
                 }
             }
+            // mark 如果原buffer没有剩余数据 并且 net write buffer没有待发送数据则处理下一个buffer
             if (!srcs[i].hasRemaining() && !hasPendingWrites()) {
                 i++;
             } else {
-                // if we are unable to write the current buffer to socketChannel we should break,
-                // as we might have reached max socket send buffer size.
+                // mark 这里直接进行了中断
+                // mark 如果我们无法将当前缓冲区写入socketChannel，我们应该中断，
+                // mark 因为我们可能已经达到最大套接字发送缓冲区大小。
                 break;
             }
         }
@@ -765,12 +883,12 @@ public class SslTransportLayer implements TransportLayer {
     }
 
     /**
-    * Writes a sequence of bytes to this channel from the given buffers.
-    *
-    * @param srcs The buffers from which bytes are to be retrieved
-    * @return returns no.of bytes consumed by SSLEngine.wrap , possibly zero.
-    * @throws IOException If some other I/O error occurs
-    */
+     * 从给定的缓冲区向此通道写入一系列字节。
+     *
+     * @param srcs 要从中检索字节的缓冲区
+     * @return 返回被 SSLEngine.wrap 消费的字节数，可能为零。
+     * @throws IOException 如果发生其他 I/O 错误
+     */
     @Override
     public long write(ByteBuffer[] srcs) throws IOException {
         return write(srcs, 0, srcs.length);
@@ -835,19 +953,27 @@ public class SslTransportLayer implements TransportLayer {
     }
 
     /**
-     * transfers appReadBuffer contents (decrypted data) into dst bytebuffer
+     * 将 appReadBuffer 的内容（解密后的数据）传输到 dst bytebuffer
      * @param dst ByteBuffer
      */
     private int readFromAppBuffer(ByteBuffer dst) {
+        // mark 切换到读模式
         appReadBuffer.flip();
+        // mark 计算两个buffer最小的剩余容量
         int remaining = Math.min(appReadBuffer.remaining(), dst.remaining());
         if (remaining > 0) {
+            // mark 记录当前的limit
             int limit = appReadBuffer.limit();
+            // mark 强制调整limit到dst可以容纳的部分
             appReadBuffer.limit(appReadBuffer.position() + remaining);
+            // mark 转移数据
             dst.put(appReadBuffer);
+            // mark 将limit调整回去
             appReadBuffer.limit(limit);
         }
+        // mark 删除 app read buffer已读部分
         appReadBuffer.compact();
+        // mark 返回读取的实际长度
         return remaining;
     }
 
@@ -978,16 +1104,26 @@ public class SslTransportLayer implements TransportLayer {
         return hasBytesBuffered;
     }
 
-    // Update `hasBytesBuffered` status. If any bytes were read from the network or
-    // if data was returned from read, `hasBytesBuffered` is set to true if any buffered
-    // data is still remaining. If not, `hasBytesBuffered` is set to false since no progress
-    // can be made until more data is available to read from the network.
+    /**
+     * 更新是否传输层是buffer中是否还有剩余数据未读取标志
+     * 此方法用于判断在网络读取缓冲区或应用读取缓冲区中是否仍有可读的字节。
+     * 目的是决定是否应进行更多的读取尝试，或者系统是否应等待更多数据可用。
+     *
+     * @param madeProgress 表示在前一次读取尝试中是否取得进展。如果取得了进展，意味着至少读取了一个字节。
+     *                     此参数有助于确定缓冲区中是否仍包含未读数据。
+     */
+    // 更新 `hasBytesBuffered` 状态。如果从网络读取了任何字节，
+    // 或者从读取操作返回了数据，如果缓冲区中仍有剩余的数据，则将 `hasBytesBuffered` 设置为 true。
+    // 如果没有，由于没有更多数据可读，`hasBytesBuffered` 将被设置为 false，因此无法取得进一步的进展。
     private void updateBytesBuffered(boolean madeProgress) {
+        // mark 如果本次有读取进展 但是net read buffer 或者 app read buffer中还有数据可读 则标记为 hasBytesBuffered
         if (madeProgress)
             hasBytesBuffered = netReadBuffer.position() != 0 || appReadBuffer.position() != 0;
         else
+            // mark 如果没有取得进展，这表明当前缓冲区为空，在更多数据到达之前无法进行进一步的读取。
             hasBytesBuffered = false;
     }
+
 
     @Override
     public long transferFrom(FileChannel fileChannel, long position, long count) throws IOException {

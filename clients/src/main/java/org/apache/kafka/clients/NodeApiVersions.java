@@ -122,20 +122,26 @@ public class NodeApiVersions {
     }
 
     /**
-     * Get the latest version supported by the broker within an allowed range of versions
+     * 在允许的版本范围内获取经纪商支持的最新版本
      */
     public short latestUsableVersion(ApiKeys apiKey, short oldestAllowedVersion, short latestAllowedVersion) {
+        // mark 如果不包含该API则抛出异常
         if (!supportedVersions.containsKey(apiKey))
             throw new UnsupportedVersionException("The broker does not support " + apiKey);
+        // mark 获取该API的版本
         ApiVersion supportedVersion = supportedVersions.get(apiKey);
+
+        // mark 传入的api和目的节点的api的交集
         Optional<ApiVersion> intersectVersion = ApiVersionsResponse.intersect(supportedVersion,
             new ApiVersion()
                 .setApiKey(apiKey.id)
                 .setMinVersion(oldestAllowedVersion)
                 .setMaxVersion(latestAllowedVersion));
 
+        // mark 如果存在则返回最大也就是最新的版本号
         if (intersectVersion.isPresent())
             return intersectVersion.get().maxVersion();
+            // mark 否则抛出异常
         else
             throw new UnsupportedVersionException("The broker does not support " + apiKey +
                 " with version in range [" + oldestAllowedVersion + "," + latestAllowedVersion + "]. The supported" +

@@ -22,15 +22,19 @@ import org.apache.kafka.common.requests.AbstractResponse;
 import org.apache.kafka.common.requests.RequestHeader;
 
 /**
- * A response from the server. Contains both the body of the response as well as the correlated request
- * metadata that was originally sent.
+ * 来自服务器的响应。包含响应主体以及最初发送的关联请求元数据。
  */
 public class ClientResponse {
 
+    // mark 请求头
     private final RequestHeader requestHeader;
+    // mark 请求完成后的回调方法
     private final RequestCompletionHandler callback;
+    // mark 请求地址
     private final String destination;
+    // mark 请求响应时间
     private final long receivedTimeMs;
+    // mark 延迟时间
     private final long latencyMs;
     private final boolean disconnected;
     private final UnsupportedVersionException versionMismatch;

@@ -293,21 +293,41 @@ public class ApiVersionsResponse extends AbstractResponse {
         return converted;
     }
 
+    /**
+     * 计算两个ApiVersion对象的交集。
+     * 交集的定义是具有相同apiKey且版本号范围在两个版本范围内的ApiVersion。
+     *
+     * @param thisVersion 当前版本对象，不可为null。
+     * @param other       另一个版本对象，不可为null。
+     * @return 交集版本对象的Optional。如果apiKey不匹配或交集不存在，则返回空。
+     * @throws IllegalArgumentException 如果apiKey不匹配，则抛出此异常。
+     */
     public static Optional<ApiVersion> intersect(ApiVersion thisVersion,
                                                  ApiVersion other) {
+        // mark 检查参数是否为null
         if (thisVersion == null || other == null) return Optional.empty();
+
+        // mark 检查apiKey是否相同，如果不相同则抛出异常
         if (thisVersion.apiKey() != other.apiKey())
             throw new IllegalArgumentException("thisVersion.apiKey: " + thisVersion.apiKey()
                 + " must be equal to other.apiKey: " + other.apiKey());
+
+        // mark 计算最大最小版本号，保证minVersion不大于maxVersion
         short minVersion = (short) Math.max(thisVersion.minVersion(), other.minVersion());
         short maxVersion = (short) Math.min(thisVersion.maxVersion(), other.maxVersion());
-        return minVersion > maxVersion
-                ? Optional.empty()
-                : Optional.of(new ApiVersion()
+
+        // mark 如果最小版本大于最大版本，说明没有交集，返回空的Optional
+        if (minVersion > maxVersion)
+            return Optional.empty();
+        else {
+            // mark 创建并返回新的ApiVersion对象，表示交集
+            return Optional.of(new ApiVersion()
                     .setApiKey(thisVersion.apiKey())
                     .setMinVersion(minVersion)
                     .setMaxVersion(maxVersion));
+        }
     }
+
 
     public static ApiVersion toApiVersion(ApiKeys apiKey) {
         return new ApiVersion()

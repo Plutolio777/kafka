@@ -39,7 +39,9 @@ public class PlaintextChannelBuilder implements ChannelBuilder {
 
     // mark 监听器名称
     private final ListenerName listenerName;
-    // mark 配置
+    /**
+     * 通道的生成参考 {@link org.apache.kafka.common.network.ChannelBuilders#create}
+     */
     private Map<String, ?> configs;
 
     /**
@@ -58,7 +60,9 @@ public class PlaintextChannelBuilder implements ChannelBuilder {
     public KafkaChannel buildChannel(String id, SelectionKey key, int maxReceiveSize,
                                      MemoryPool memoryPool, ChannelMetadataRegistry metadataRegistry) throws KafkaException {
         try {
+            // mark 构建明文传输层 把key挂载到明文传输层中 相当于在明文传输层可以获取socket
             PlaintextTransportLayer transportLayer = buildTransportLayer(key);
+            // mark 创建明文认证工厂 认证类使用的是 PlaintextAuthenticator
             Supplier<Authenticator> authenticatorCreator = () -> new PlaintextAuthenticator(configs, transportLayer, listenerName);
             return buildChannel(id, transportLayer, authenticatorCreator, maxReceiveSize,
                     memoryPool != null ? memoryPool : MemoryPool.NONE, metadataRegistry);

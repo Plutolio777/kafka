@@ -284,8 +284,10 @@ class BrokerToControllerChannelManagerImpl(
    * @return 新创建的请求线程。
    */
   private[server] def newRequestThread = {
+
+    // mark 构建network客户端
     def buildNetworkClient(controllerInfo: ControllerInformation) = {
-      // mark 创建对应的通道构建器
+      // mark 1.根据配置创建默认的通道构建器
       val channelBuilder = ChannelBuilders.clientChannelBuilder(
         controllerInfo.securityProtocol,
         JaasContext.Type.SERVER,
@@ -297,7 +299,7 @@ class BrokerToControllerChannelManagerImpl(
         logContext
       )
 
-      // mark 如果实现了 Reconfigurable 接口添加到可重复配置列表中（主要是在动态配置管理器里面）当配置动态变更的时候会通知进行重新配置吧
+      // mark 2.如果实现了 Reconfigurable 接口添加到可重复配置列表中（主要是在动态配置管理器里面）当配置动态变更的时候会通知进行重新配置吧
       channelBuilder match {
         case reconfigurable: Reconfigurable => config.addReconfigurable(reconfigurable)
         case _ =>
@@ -356,7 +358,7 @@ class BrokerToControllerChannelManagerImpl(
       case Some(name) => s"$name:BrokerToControllerChannelManager broker=${config.brokerId} name=$channelName"
     }
 
-    // mark 获取控制节点信息
+    // mark 获取控制节点信息(这个里面的控制节点主要是决定使用zk还是raft)
     val controllerInformation = controllerNodeProvider.getControllerInfo()
 
     // mark 创建Broker到Controller请求处理线程

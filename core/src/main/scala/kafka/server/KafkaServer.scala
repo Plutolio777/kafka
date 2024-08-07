@@ -359,15 +359,19 @@ class KafkaServer(
           // mark 重试超时时间
           retryTimeoutMs = config.requestTimeoutMs.longValue
         )
+        // mark 启动Broker到控制器的通道管理器中的轮询线程 开始接收控制器请求
         clientToControllerChannelManager.start()
 
         /* start forwarding manager */
         var autoTopicCreationChannel = Option.empty[BrokerToControllerChannelManager]
+        // mark 如果启动了转发 则创建转发管理器
         if (enableForwarding) {
+
           this.forwardingManager = Some(ForwardingManager(clientToControllerChannelManager))
           autoTopicCreationChannel = Some(clientToControllerChannelManager)
         }
 
+        // mark 创建APIVersion管理器
         val apiVersionManager = ApiVersionManager(
           ListenerType.ZK_BROKER,
           config,

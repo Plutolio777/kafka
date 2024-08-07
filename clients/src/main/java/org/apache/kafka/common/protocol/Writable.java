@@ -35,27 +35,51 @@ public interface Writable {
     void writeVarint(int i);
     void writeVarlong(long i);
 
+    /**
+     * 将给定的记录写入输出。
+     * 此方法支持直接将MemoryRecords实例写入输出，
+     * 通过提取底层的ByteBuffer并调用writeByteBuffer方法来实现。
+     *
+     * @param records 要写入的BaseRecords实例
+     */
     default void writeRecords(BaseRecords records) {
         if (records instanceof MemoryRecords) {
             MemoryRecords memRecords = (MemoryRecords) records;
             writeByteBuffer(memRecords.buffer());
         } else {
-            throw new UnsupportedOperationException("Unsupported record type " + records.getClass());
+            throw new UnsupportedOperationException("不支持的记录类型 " + records.getClass());
         }
     }
 
+    /**
+     * 将UUID对象写入输出。
+     * 先写入UUID的高位部分，再写入低位部分。
+     *
+     * @param uuid 要写入的UUID对象
+     */
     default void writeUuid(Uuid uuid) {
+        // mark 先写入uuid的高位部分
         writeLong(uuid.getMostSignificantBits());
+        // mark 再写入uuid的低位
         writeLong(uuid.getLeastSignificantBits());
     }
 
+    /**
+     * 写入一个无符号短整型数。
+     *
+     * @param i 要写入的无符号短整型数值
+     */
     default void writeUnsignedShort(int i) {
-        // The setter functions in the generated code prevent us from setting
-        // ints outside the valid range of a short.
         writeShort((short) i);
     }
 
+    /**
+     * 写入一个无符号整型数。
+     *
+     * @param i 要写入的无符号整型数值
+     */
     default void writeUnsignedInt(long i) {
         writeInt((int) i);
     }
+
 }

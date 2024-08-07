@@ -23,7 +23,7 @@ import java.security.Provider;
 import java.util.Map;
 
 /**
- * An interface for generating security providers.
+ * 用于生成安全提供程序的接口。
  */
 @InterfaceStability.Evolving
 public interface SecurityProviderCreator extends Configurable {

@@ -263,8 +263,18 @@ private class UnsentRequests {
     unsent.entrySet().iterator()
   }
 
+  /**
+   * 根据给定的节点获取未发送的请求的迭代器。
+   *
+   * @param node 表示当前请求的目标节点。这个节点将被用来查找与之相关的未发送请求。
+   * @return 返回一个Iterator[ClientRequest]，用于遍历节点尚未发送的请求。如果节点没有未发送的请求，
+   *         则返回一个空的迭代器。
+   */
   def requestIterator(node: Node): Iterator[ClientRequest] = {
+    // 通过节点从未发送请求的映射中获取请求列表。
     val requests = unsent.get(node)
+
+    // 如果请求列表为空，则返回一个空的迭代器，否则返回请求列表的迭代器。
     if (requests == null)
       Collections.emptyIterator[ClientRequest]
     else

@@ -87,6 +87,8 @@ final class ClusterConnectionStates {
             return true;
         else
             // mark 如果节点时区连接 并且上次连接时间间隔已经大于重连延时则可以重新连接
+            // mark 1.连接时断开连接
+            // mark 2. （当前时间 - 上次企图连接的时间） >= 连接退避时间
             return state.state.isDisconnected() &&
                    now - state.lastConnectAttemptMs >= state.reconnectBackoffMs;
     }
@@ -104,11 +106,12 @@ final class ClusterConnectionStates {
     }
 
     /**
-     * Returns the number of milliseconds to wait, based on the connection state, before attempting to send data. When
-     * disconnected, this respects the reconnect backoff time. When connecting, return a delay based on the connection timeout.
-     * When connected, wait indefinitely (i.e. until a wakeup).
-     * @param id the connection to check
-     * @param now the current time in ms
+     * 发起连接之后，应该多久尝试接下来的操作
+     * 当断开连接时，遵循重连的退避时间。
+     * 当正在连接时，返回基于连接超时时间的延迟。（正在连接的节点最晚连接超时时间到了会有结果）
+     * 当连接成功时，等待无限时间（即，直到唤醒）。
+     * @param id 要检查的连接
+     * @param now 当前时间（毫秒）
      */
     public long connectionDelay(String id, long now) {
         NodeConnectionState state = nodeState.get(id);
@@ -160,11 +163,12 @@ final class ClusterConnectionStates {
             connectionState.lastConnectAttemptMs = now;
             // mark 标记为正在连接中
             connectionState.state = ConnectionState.CONNECTING;
-            // mark 移动到下一个解析的地址，或者如果地址耗尽，则标记要重新解析的节点
+            // mark 移动到下一个解析的地址，或者如果地址耗尽，则标记要重新解析的节点 （对应一个域名下如果有多个IP）
             connectionState.moveToNextAddress();
             // mark 添加到连接中节点集合中（只添加了个ID）
             connectingNodes.add(id);
             return;
+            // mark 说明连接前后的域名已经变了 (这里改变的方式为直接重新创建一个连接状态)
         } else if (connectionState != null) {
             log.info("Hostname for node {} changed from {} to {}.", id, connectionState.host(), host);
         }
@@ -172,6 +176,7 @@ final class ClusterConnectionStates {
         // mark 如果 nodeState 尚不包含，则创建一个新的 NodeConnectionState
         // mark 添加节点状态到注册表中
         nodeState.put(id, new NodeConnectionState(ConnectionState.CONNECTING, now,
+                // mark 重复连接退避时间（指数退避算法）    连接建立超时时间（指数退避算法）
                 reconnectBackoff.backoff(0), connectionSetupTimeout.backoff(0), host, hostResolver));
         connectingNodes.add(id);
     }

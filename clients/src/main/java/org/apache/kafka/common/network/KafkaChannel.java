@@ -33,35 +33,21 @@ import java.util.Optional;
 import java.util.function.Supplier;
 
 /**
- * A Kafka connection either existing on a client (which could be a broker in an
- * inter-broker scenario) and representing the channel to a remote broker or the
- * reverse (existing on a broker and representing the channel to a remote
- * client, which could be a broker in an inter-broker scenario).
+ * 一个 Kafka 连接可以是客户端上现有的（可能是一个代理服务器，在代理间场景中）并表示到远程代理的通道，
+ * 或反之（存在于代理服务器上，表示到远程客户端的通道，在代理间场景中客户端也可能是代理服务器）。
  * <p>
- * Each instance has the following:
+ * 每个实例具有以下内容：
  * <ul>
- * <li>a unique ID identifying it in the {@code KafkaClient} instance via which
- * the connection was made on the client-side or in the instance where it was
- * accepted on the server-side</li>
- * <li>a reference to the underlying {@link TransportLayer} to allow reading and
- * writing</li>
- * <li>an {@link Authenticator} that performs the authentication (or
- * re-authentication, if that feature is enabled and it applies to this
- * connection) by reading and writing directly from/to the same
- * {@link TransportLayer}.</li>
- * <li>a {@link MemoryPool} into which responses are read (typically the JVM
- * heap for clients, though smaller pools can be used for brokers and for
- * testing out-of-memory scenarios)</li>
- * <li>a {@link NetworkReceive} representing the current incomplete/in-progress
- * request (from the server-side perspective) or response (from the client-side
- * perspective) being read, if applicable; or a non-null value that has had no
- * data read into it yet or a null value if there is no in-progress
- * request/response (either could be the case)</li>
- * <li>a {@link Send} representing the current request (from the client-side
- * perspective) or response (from the server-side perspective) that is either
- * waiting to be sent or partially sent, if applicable, or null</li>
- * <li>a {@link ChannelMuteState} to document if the channel has been muted due
- * to memory pressure or other reasons</li>
+ * <li>一个唯一的 ID，用于在客户端侧的 {@code KafkaClient} 实例中识别该连接，或者在服务器端接收的实例中识别该连接</li>
+ * <li>一个对底层 {@link TransportLayer} 的引用，用于允许读写操作</li>
+ * <li>一个 {@link Authenticator}，它通过直接从/向同一个 {@link TransportLayer} 读取和写入来执行身份验证（或重新身份验证，
+ * 如果该功能已启用并且适用于此连接）</li>
+ * <li>一个 {@link MemoryPool}，用于读取响应（通常对于客户端是 JVM 堆，虽然可以为代理服务器和测试内存不足场景使用较小的池）</li>
+ * <li>一个 {@link NetworkReceive}，表示当前未完成/进行中的请求（从服务器端的角度）或响应（从客户端的角度），
+ * 如果适用；或一个尚未读取任何数据的非空值，或者如果没有进行中的请求/响应则为 null</li>
+ * <li>一个 {@link Send}，表示当前的请求（从客户端的角度）或响应（从服务器端的角度），可能是等待发送或部分发送，
+ * 如果适用，或者为 null</li>
+ * <li>一个 {@link ChannelMuteState}，记录通道是否由于内存压力或其他原因被静音</li>
  * </ul>
  */
 public class KafkaChannel implements AutoCloseable {
@@ -114,16 +100,25 @@ public class KafkaChannel implements AutoCloseable {
     }
 
     private final String id;
+    // mark 数据传输层
     private final TransportLayer transportLayer;
+    // mark 认证器生成器
     private final Supplier<Authenticator> authenticatorCreator;
+    // mark 认证器
     private Authenticator authenticator;
+
     // Tracks accumulated network thread time. This is updated on the network thread.
     // The values are read and reset after each response is sent.
+
     private long networkThreadTimeNanos;
+    // mark 最大接收大小
     private final int maxReceiveSize;
+    // mark 内存池
     private final MemoryPool memoryPool;
     private final ChannelMetadataRegistry metadataRegistry;
+    // mark 通道挂载的网络接收数据
     private NetworkReceive receive;
+    // mark 通道挂载的网络发送数据包
     private NetworkSend send;
     // Track connection and mute state of channels to enable outstanding requests on channels to be
     // processed after the channel is disconnected.
@@ -167,17 +162,21 @@ public class KafkaChannel implements AutoCloseable {
     }
 
     /**
-     * Does handshake of transportLayer and authentication using configured authenticator.
-     * For SSL with client authentication enabled, {@link TransportLayer#handshake()} performs
-     * authentication. For SASL, authentication is performed by {@link Authenticator#authenticate()}.
+     * 使用配置的认证器执行传输层的握手和认证。
+     *
+     * 对于启用客户端认证的 SSL，{@link TransportLayer#handshake()} 执行认证。
+     * 对于 SASL，认证由 {@link Authenticator#authenticate()} 执行。
      */
     public void prepare() throws AuthenticationException, IOException {
         boolean authenticating = false;
         try {
+            // mark 如果传输层没有准备好 （主要正对SSL传输层 明文传输层默认是true）
             if (!transportLayer.ready())
+                // mark 传输层执行握手过程
                 transportLayer.handshake();
             if (transportLayer.ready() && !authenticator.complete()) {
                 authenticating = true;
+                // mark 调用认证器的 authenticate 进行身份认证
                 authenticator.authenticate();
             }
         } catch (AuthenticationException e) {
@@ -191,6 +190,7 @@ public class KafkaChannel implements AutoCloseable {
             }
             throw e;
         }
+
         if (ready()) {
             ++successfulAuthentications;
             state = ChannelState.READY;
@@ -214,25 +214,42 @@ public class KafkaChannel implements AutoCloseable {
         return this.state;
     }
 
+    /**
+     * 尝试完成连接。
+     * <p>
+     * 此方法尝试完成连接的建立。在调用finishConnect()之前，
+     * 我们需要获取远程地址，否则如果连接被拒绝，将无法访问远程地址。
+     *
+     * @return boolean 连接是否成功完成
+     * @throws IOException 如果发生I/O错误
+     */
     public boolean finishConnect() throws IOException {
-        //we need to grab remoteAddr before finishConnect() is called otherwise
-        //it becomes inaccessible if the connection was refused.
+        // mark 从传输层中获取socket channel
         SocketChannel socketChannel = transportLayer.socketChannel();
+
         if (socketChannel != null) {
             remoteAddress = socketChannel.getRemoteAddress();
         }
+
+        // mark 调用传输层结束连接操作 （不再关注连接事件 关注可读事件）
         boolean connected = transportLayer.finishConnect();
+
         if (connected) {
+            // mark 如果传输层和认证层都OK则 kafka channel状态设置为ready
             if (ready()) {
                 state = ChannelState.READY;
+                // mark 连接状态都设置为 AUTHENTICATE
             } else if (remoteAddress != null) {
                 state = new ChannelState(ChannelState.State.AUTHENTICATE, remoteAddress.toString());
             } else {
                 state = ChannelState.AUTHENTICATE;
             }
         }
+
+        // 返回连接结果
         return connected;
     }
+
 
     public boolean isConnected() {
         return transportLayer.isConnected();
@@ -257,12 +274,13 @@ public class KafkaChannel implements AutoCloseable {
     }
 
     /**
-     * Unmute the channel. The channel can be unmuted only if it is in the MUTED state. For other muted states
-     * (MUTED_AND_*), this is a no-op.
+     * 取消静音通道。只有在通道处于 MUTED 状态时才能取消静音。
+     * 对于其他静音状态（MUTED_AND_*），这是一个无操作。
      *
-     * @return Whether or not the channel is in the NOT_MUTED state after the call
+     * @return 调用后通道是否处于 NOT_MUTED 状态
      */
     boolean maybeUnmute() {
+        // mark 如果通道状态是静默的则传输层增加可读时间监听
         if (muteState == ChannelMuteState.MUTED) {
             if (!disconnected) transportLayer.addInterestOps(SelectionKey.OP_READ);
             muteState = ChannelMuteState.NOT_MUTED;
@@ -351,6 +369,20 @@ public class KafkaChannel implements AutoCloseable {
         return transportLayer.ready();
     }
 
+    /**
+     * 检查kafka通道是否准备完毕
+     * <p>
+     * 该方法通过检查两个条件来确定对象是否准备好：
+     * <ul>
+     *   <li>{@link #transportLayer} 的 {@code ready()} 方法是否返回 {@code true}</li>
+     *   <li>{@link #authenticator} 的 {@code complete()} 方法是否返回 {@code true}</li>
+     * </ul>
+     * 如果这两个条件都满足，则返回 {@code true}，表示对象已准备好；否则返回 {@code false}。
+     * </p>
+     *
+     * @return 如果 {@link #transportLayer} 和 {@link #authenticator} 都表示准备好，则返回 {@code true}；
+     * 否则返回 {@code false}。
+     */
     public boolean ready() {
         return transportLayer.ready() && authenticator.complete();
     }
@@ -376,17 +408,59 @@ public class KafkaChannel implements AutoCloseable {
         return socket.getInetAddress().toString();
     }
 
+    /**
+     * 将发送的数据挂载到kafka channel中
+     *
+     * 此方法用于设定当前连接的发送处理器。在设定之前，会检查是否已经有其他的发送处理器正在使用，
+     * 如果存在，则抛出IllegalStateException，表示不能在前一个发送操作尚未完成的情况下开始新的发送操作。
+     * 这种设计保证了每个连接在任意时刻只进行一个发送操作，避免了并发场景下的发送冲突。
+     *
+     * @param send 发送处理器，用于处理网络发送操作。
+     * @throws IllegalStateException 如果已有发送操作正在进行，则抛出此异常。
+     */
     public void setSend(NetworkSend send) {
+        // 检查是否已经有发送处理器，如果存在则抛出异常
         if (this.send != null)
             throw new IllegalStateException("Attempt to begin a send operation with prior send operation still in progress, connection id is " + id);
+        // 设置新的发送处理器
+        // mark 挂载send
         this.send = send;
+        // 对应的传输层添加写兴趣操作，表示现在可以进行发送操作
+        // mark 请求可写事件
         this.transportLayer.addInterestOps(SelectionKey.OP_WRITE);
     }
 
+    /**
+     * 尝试完成当前的发送操作
+     * 如果当前有发送操作并且已经完成，则将其标记为完成状态，并返回该发送对象
+     * 否则，返回null
+     *
+     * @return 完成的发送对象，如果当前没有发送操作或发送操作未完成，则返回null
+     */
     public NetworkSend maybeCompleteSend() {
+
+        /**
+         * 这里调用Send对象的completed方法进行确认
+         * 具体Send完成发送的逻辑如下：
+         *     ByteBufferSend {@link ByteBufferSend#completed()}
+         *          1.总体剩余容量小于0
+         *          2.发送过程中没有发生pending
+         *     RecordsSend {@link org.apache.kafka.common.record.RecordsSend#completed()}
+         *          1.总体剩余容量小于0
+         *          2.发送过程中没有发生pending
+         *     MultiRecordsSend {@link MultiRecordsSend#completed()}
+         *          1.当前发送指针为null
+         */
         if (send != null && send.completed()) {
+            // mark 修改发送中标志 表示发送已经结束
             midWrite = false;
+            /**
+             * mark 发送结束 通道不再关注可读事件
+             * 通道监听可写事件的时机是Send对象被挂载到kafka channel上的时候 详见
+             * {@link KafkaChannel#setSend(NetworkSend)} 以及 {@link  Selector#send(NetworkSend)}
+             */
             transportLayer.removeInterestOps(SelectionKey.OP_WRITE);
+            // mark 清空挂载的send对象并返回结果
             NetworkSend result = send;
             send = null;
             return result;
@@ -394,27 +468,54 @@ public class KafkaChannel implements AutoCloseable {
         return null;
     }
 
+    /**
+     * 尝试从网络读取数据，并在必要时分配内存。
+     * @return 返回接收到的字节数。
+     * @throws IOException 如果在接收操作期间发生I/O错误。
+     */
     public long read() throws IOException {
+        // mark 检查receive对象是否已初始化，如果没有，进行初始化。
         if (receive == null) {
             receive = new NetworkReceive(maxReceiveSize, id, memoryPool);
         }
 
+        // mark 尝试接收数据，假设receive方法处理了从网络接收数据的所有细节。
         long bytesReceived = receive(this.receive);
 
+        // mark 如果receive不为空 但是buffer为null说明分配内存的时候失败了
+        // mark 此时检查通道是否满足静音条件
+        // mark 1. receive==null 或者 receive.buffer！=null 这两种情况下都不足以说明内存分配失败 不满足静音条件
+        // mark 2. 传输层通道是否ready 如果ready则可以确认是内存分配失败 则进行静音
         if (this.receive.requiredMemoryAmountKnown() && !this.receive.memoryAllocated() && isInMutableState()) {
-            //pool must be out of memory, mute ourselves.
+            // mark 内存池可能已经耗尽，自我静音。
             mute();
         }
+        // mark 返回接收到的字节数。
         return bytesReceived;
     }
+
 
     public NetworkReceive currentReceive() {
         return receive;
     }
 
+    /**
+     * 尝试完成网络接收操作。
+     * <p>
+     * 此方法用于检查当前是否有一个已完成的网络接收操作（NetworkReceive）。如果存在，并且该操作可以被完成（complete方法返回true），则该方法会重置这个接收操作的负载（payload）的读取位置，并将当前的接收对象设置为null，以准备接收新的网络数据。
+     * <p>
+     * 方法返回的是一个可能已完成的网络接收对象，如果当前没有可完成的接收操作，则返回null。
+     *
+     * @return 如果存在并已完成一个网络接收操作，则返回该操作对象；否则返回null。
+     */
     public NetworkReceive maybeCompleteReceive() {
+        // mark 如果 receive不为空，且receive已经完成，则将receive设置为null，并返回receive对象。
+        // mark 1.receive 的size（4字节）没有空余空间 说明消息头size接收完毕
+        // mark 2.receive 的buffer (根据size分配的空间) 没有空余空间 说明payload接收完毕
         if (receive != null && receive.complete()) {
+            // mark 重置buffer写指针
             receive.payload().rewind();
+            // mark 重置通道的receive并返回当前receive
             NetworkReceive result = receive;
             receive = null;
             return result;
@@ -422,10 +523,16 @@ public class KafkaChannel implements AutoCloseable {
         return null;
     }
 
+    /**
+     * 尝试写入数据到传输层
+     *
+     * @return 写入的数据量如果send为null，则返回0
+     * @throws IOException 如果写入过程中发生I/O错误
+     */
     public long write() throws IOException {
         if (send == null)
             return 0;
-
+        // mark 添加正在写入标志
         midWrite = true;
         return send.writeTo(transportLayer);
     }
@@ -449,7 +556,9 @@ public class KafkaChannel implements AutoCloseable {
 
     private long receive(NetworkReceive receive) throws IOException {
         try {
+            // mark 从传输层接收数据
             return receive.readFrom(transportLayer);
+            // mark 如果出现SslAuthenticationException则将空岛状态标记为认证失败
         } catch (SslAuthenticationException e) {
             // With TLSv1.3, post-handshake messages may throw SSLExceptions, which are
             // handled as authentication failures
@@ -561,34 +670,26 @@ public class KafkaChannel implements AutoCloseable {
     }
 
     /**
-     * If this is a client-side connection that is not muted, there is no
-     * in-progress write, and there is a session expiration time defined that has
-     * past then begin the process of re-authenticating the connection and return
-     * true, otherwise return false
-     * 
+     * 如果这是一个未静音的客户端连接，且没有进行中的写操作，并且定义了已过期的会话过期时间，
+     * 则开始重新认证连接的过程并返回 true，否则返回 false。
+     *
      * @param nowNanosSupplier
-     *            {@code Supplier} of the current time. The value must be in
-     *            nanoseconds as per {@code System.nanoTime()} and is therefore only
-     *            useful when compared to such a value -- it's absolute value is
-     *            meaningless.
-     * 
-     * @return true if this is a client-side connection that is not muted, there is
-     *         no in-progress write, and there is a session expiration time defined
-     *         that has past to indicate that the re-authentication process has
-     *         begun, otherwise false
-     * @throws AuthenticationException
-     *             if re-authentication fails due to invalid credentials or other
-     *             security configuration errors
-     * @throws IOException
-     *             if read/write fails due to an I/O error
-     * @throws IllegalStateException
-     *             if this channel is not "ready"
+     *            当前时间的 {@code Supplier}。该值必须以纳秒为单位，
+     *            如 {@code System.nanoTime()}，因此只有在与该值进行比较时才有意义 —— 它的绝对值是没有意义的。
+     *
+     * @return 如果这是一个未静音的客户端连接，没有进行中的写操作，并且定义了已过期的会话过期时间，
+     *         表示重新认证过程已经开始，则返回 true，否则返回 false。
+     *
+     * @throws AuthenticationException 如果由于无效的凭据或其他安全配置错误而导致重新认证失败
+     * @throws IOException 如果由于 I/O 错误导致读/写失败
+     * @throws IllegalStateException 如果此通道未“就绪”
      */
     public boolean maybeBeginClientReauthentication(Supplier<Long> nowNanosSupplier)
             throws AuthenticationException, IOException {
         if (!ready())
             throw new IllegalStateException(
                     "KafkaChannel should always be \"ready\" when it is checked for possible re-authentication");
+        // mark 如果认证器重新认证时间为null且通道未静音或者正在写入时 返回false
         if (muteState != ChannelMuteState.NOT_MUTED || midWrite
                 || authenticator.clientSessionReauthenticationTimeNanos() == null)
             return false;
@@ -596,9 +697,11 @@ public class KafkaChannel implements AutoCloseable {
          * We've delayed getting the time as long as possible in case we don't need it,
          * but at this point we need it -- so get it now.
          */
+        // mark 重新认证时间未到 返回fasle
         long nowNanos = nowNanosSupplier.get();
         if (nowNanos < authenticator.clientSessionReauthenticationTimeNanos())
             return false;
+        // mark 开始重新认证
         swapAuthenticatorsAndBeginReauthentication(new ReauthenticationContext(authenticator, receive, nowNanos));
         receive = null;
         return true;

@@ -313,10 +313,10 @@ public class AbstractConfig {
                 // mark 提取去掉前缀的部分
                 String keyWithNoPrefix = entry.getKey().substring(prefix.length());
 
-                // mark 判断是否存在配置key
+                // mark 检查kafka配置定义中是否存在这样的配置
                 ConfigDef.ConfigKey configKey = definition.configKeys().get(keyWithNoPrefix);
                 if (configKey != null)
-                    // mark 存在则覆盖原始key
+                    // mark 存在则用这个key覆盖，并重新解析配置值
                     result.put(keyWithNoPrefix, definition.parseValue(configKey, entry.getValue(), true));
                 else {
                     // mark 尝试跳到下一个.后面再提取一次

@@ -56,22 +56,33 @@ import scala.jdk.CollectionConverters._
 import scala.util.control.ControlThrowable
 
 /**
- * Handles new connections, requests and responses to and from broker.
- * Kafka supports two types of request planes :
- *  - data-plane :
- *    - Handles requests from clients and other brokers in the cluster.
- *    - The threading model is
- *      1 Acceptor thread per listener, that handles new connections.
- *      It is possible to configure multiple data-planes by specifying multiple "," separated endpoints for "listeners" in KafkaConfig.
- *      Acceptor has N Processor threads that each have their own selector and read requests from sockets
- *      M Handler threads that handle requests and produce responses back to the processor threads for writing.
- *  - control-plane :
- *    - Handles requests from controller. This is optional and can be configured by specifying "control.plane.listener.name".
- *      If not configured, the controller requests are handled by the data-plane.
- *    - The threading model is
- *      1 Acceptor thread that handles new connections
- *      Acceptor has 1 Processor thread that has its own selector and read requests from the socket.
- *      1 Handler thread that handles requests and produces responses back to the processor thread for writing.
+ * 处理来自代理的新连接、请求和响应。
+ * Kafka 支持两种类型的请求平面：
+ *
+ * <ul>
+ * <li>数据平面：</li>
+ * <ul>
+ * <li>处理来自客户端和集群中其他代理的请求。</li>
+ * <li>线程模型是每个监听器1个接受线程，处理新连接。
+ * 可以通过在 KafkaConfig 中为 "listeners" 指定多个逗号分隔的端点来配置多个数据平面。
+ * 接受器有 N 个处理器线程，每个处理器线程都有自己的选择器，并从套接字读取请求。
+ * M 个处理器线程处理请求并生成响应，返回给处理器线程进行写入。</li>
+ * </ul>
+ * <li>控制平面：</li>
+ * <ul>
+ * <li>处理来自控制器的请求。这是可选的，可以通过指定 "control.plane.listener.name" 进行配置。
+ * 如果没有配置，控制器请求由数据平面处理。</li>
+ * <li>线程模型是1个接受线程处理新连接。
+ * 接受器有1个处理器线程，具有自己的选择器并从套接字读取请求。
+ * 1个处理器线程处理请求并生成响应，返回给处理器线程进行写入。</li>
+ * </ul>
+ * </ul>
+ *
+ * @param config Kafka配置对象，用于服务的配置参数
+ * @param metrics Kafka的度量对象，用于监控和度量服务性能
+ * @param time 时间服务对象，用于获取系统时间
+ * @param credentialProvider 凭证提供者，用于管理和提供安全凭证
+ * @param apiVersionManager API版本管理器，用于管理Kafka API的版本
  */
 class SocketServer(val config: KafkaConfig,
                    val metrics: Metrics,
@@ -80,22 +91,36 @@ class SocketServer(val config: KafkaConfig,
                    val apiVersionManager: ApiVersionManager)
   extends Logging with KafkaMetricsGroup with BrokerReconfigurable {
 
+  // mark 请求队列中最大请求数
   private val maxQueuedRequests = config.queuedMaxRequests
 
+  // mark 节点ID
   protected val nodeId = config.brokerId
 
+  //
   private val logContext = new LogContext(s"[SocketServer listenerType=${apiVersionManager.listenerType}, nodeId=$nodeId] ")
 
   this.logIdent = logContext.logPrefix
 
+  // mark 内存池指标传感器
   private val memoryPoolSensor = metrics.sensor("MemoryPoolUtilization")
+  // mark 内存池内存耗尽指标名称
   private val memoryPoolDepletedPercentMetricName = metrics.metricName("MemoryPoolAvgDepletedPercent", MetricsGroup)
+  // mark 内存池内存好景时间指标名称
   private val memoryPoolDepletedTimeMetricName = metrics.metricName("MemoryPoolDepletedTimeTotal", MetricsGroup)
+  // mark 创建指标
   memoryPoolSensor.add(new Meter(TimeUnit.MILLISECONDS, memoryPoolDepletedPercentMetricName, memoryPoolDepletedTimeMetricName))
+
+  // mark 使用简单内存池 [[SimpleMemoryPool]]
   private val memoryPool = if (config.queuedMaxBytes > 0) new SimpleMemoryPool(config.queuedMaxBytes, config.socketRequestMaxBytes, false, memoryPoolSensor) else MemoryPool.NONE
+
+
   // data-plane
+  // mark 数据接口连接接收器
   private[network] val dataPlaneAcceptors = new ConcurrentHashMap[EndPoint, DataPlaneAcceptor]()
+  // mark 创建请求处理通道
   val dataPlaneRequestChannel = new RequestChannel(maxQueuedRequests, DataPlaneAcceptor.MetricPrefix, time, apiVersionManager.newRequestMetrics)
+
   // control-plane
   private[network] var controlPlaneAcceptorOpt: Option[ControlPlaneAcceptor] = None
   val controlPlaneRequestChannelOpt: Option[RequestChannel] = config.controlPlaneListenerName.map(_ =>
@@ -162,10 +187,13 @@ class SocketServer(val config: KafkaConfig,
     })
   }
 
-  // Create acceptors and processors for the statically configured endpoints when the
-  // SocketServer is constructed. Note that this just opens the ports and creates the data
-  // structures. It does not start the acceptors and processors or their associated JVM
-  // threads.
+  // 为静态配置的端点创建接受器和处理器
+  // SocketServer 已构建。请注意，这只是打开端口并创建数据
+  // 结构体。它不会启动接受器和处理器或其关联的 JVM
+  // 线程。
+  // mark 如果监听类型是CONTROLLER则创建
+  // mark zookeeper模式下kafka所有的监听器类型为ZK_BROKER kraft模式下分析为CONTROLLER和Broker
+  // mark CONTROLLER只创建数据平面处理器 Broker和ZK_BROKER创建控制平面和数据平面处理器
   if (apiVersionManager.listenerType.equals(ListenerType.CONTROLLER)) {
     config.controllerListeners.foreach(createDataPlaneAcceptorAndProcessors)
   } else {
@@ -215,21 +243,45 @@ class SocketServer(val config: KafkaConfig,
         allAuthorizerFuturesComplete)
   }
 
+  /**
+   * 创建数据平面接受器（Acceptor）和处理器（Processor）
+   * 此方法用于根据给定的端点创建一个新的数据通道接受器和相关处理器它确保在创建过程中同步访问，
+   * 避免并发问题，并且在SocketServer已停止的情况下阻止创建
+   *
+   * @param endpoint 端点对象，包含创建接受器所需的配置信息
+   * @throws RuntimeException 如果SocketServer处于停止状态，则抛出此异常
+   */
   def createDataPlaneAcceptorAndProcessors(endpoint: EndPoint): Unit = synchronized {
     if (stopped) {
       throw new RuntimeException("Can't create new data plane acceptor and processors: SocketServer is stopped.")
     }
+    // mark 根据listenerName获取指定的监听器配置
     val parsedConfigs = config.valuesFromThisConfigWithPrefixOverride(endpoint.listenerName.configPrefix)
+
+    // mark 创建连接配额管理器
     connectionQuotas.addListener(config, endpoint.listenerName)
+
+    // mark 判断创建数据平面处理器的是 控制器还是 ZK_BROKER还是BROKER
     val isPrivilegedListener = controlPlaneRequestChannelOpt.isEmpty &&
       config.interBrokerListenerName == endpoint.listenerName
+
+    // mark 创建Acceptor
     val dataPlaneAcceptor = createDataPlaneAcceptor(endpoint, isPrivilegedListener, dataPlaneRequestChannel)
+    // mark 添加到重新配置集合中
     config.addReconfigurable(dataPlaneAcceptor)
+    // mark 配置Acceptor
     dataPlaneAcceptor.configure(parsedConfigs)
     dataPlaneAcceptors.put(endpoint, dataPlaneAcceptor)
     info(s"Created data-plane acceptor and processors for endpoint : ${endpoint.listenerName}")
   }
 
+  /**
+   * 创建控制平面接受器（Acceptor）和处理器（Processor）
+   * 此方法用于在指定的端点创建一个控制平面接受器和处理器，以处理控制平面请求
+   *
+   * @param endpoint 端点信息，包含端点的名称等
+   * @throws RuntimeException 如果SocketServer已被停止，则抛出运行时异常
+   */
   private def createControlPlaneAcceptorAndProcessor(endpoint: EndPoint): Unit = synchronized {
     if (stopped) {
       throw new RuntimeException("Can't create new control plane acceptor and processor: SocketServer is stopped.")
@@ -406,19 +458,19 @@ object DataPlaneAcceptor {
   val ListenerReconfigurableConfigs = Set(KafkaConfig.NumNetworkThreadsProp)
 }
 
-class DataPlaneAcceptor(socketServer: SocketServer,
-                        endPoint: EndPoint,
-                        config: KafkaConfig,
-                        nodeId: Int,
-                        connectionQuotas: ConnectionQuotas,
-                        time: Time,
+class DataPlaneAcceptor(socketServer: SocketServer, // mark socket server 实例对象
+                        endPoint: EndPoint, // mark 监听器端点信息
+                        config: KafkaConfig, // mark kafka配置信息
+                        nodeId: Int, // mark broker id
+                        connectionQuotas: ConnectionQuotas, // mark 连接配额管理器
+                        time: Time, // mark 时间工具类
                         isPrivilegedListener: Boolean,
-                        requestChannel: RequestChannel,
-                        metrics: Metrics,
-                        credentialProvider: CredentialProvider,
-                        logContext: LogContext,
-                        memoryPool: MemoryPool,
-                        apiVersionManager: ApiVersionManager)
+                        requestChannel: RequestChannel, // mark 请求队列
+                        metrics: Metrics, // mark 指标管理器
+                        credentialProvider: CredentialProvider, // mark 凭证提供者
+                        logContext: LogContext, // mark 日志上下文
+                        memoryPool: MemoryPool, // mark 内存池
+                        apiVersionManager: ApiVersionManager) // mark api管理器
   extends Acceptor(socketServer,
                    endPoint,
                    config,
@@ -500,6 +552,7 @@ class DataPlaneAcceptor(socketServer: SocketServer,
    * Configure this class with the given key-value pairs
    */
   override def configure(configs: util.Map[String, _]): Unit = {
+    // mark 根据num.network.threads指定的线程数量创建Processor对象
     addProcessors(configs.get(KafkaConfig.NumNetworkThreadsProp).asInstanceOf[Int])
   }
 }
@@ -547,7 +600,7 @@ class ControlPlaneAcceptor(socketServer: SocketServer,
 }
 
 /**
- * Thread that accepts and configures new connections. There is one of these per endpoint.
+ * 接受并配置新连接的线程。每个端点都有一个。
  */
 private[kafka] abstract class Acceptor(val socketServer: SocketServer,
                                        val endPoint: EndPoint,
@@ -564,34 +617,51 @@ private[kafka] abstract class Acceptor(val socketServer: SocketServer,
                                        apiVersionManager: ApiVersionManager)
   extends Runnable with Logging with KafkaMetricsGroup {
 
+
   val shouldRun = new AtomicBoolean(true)
 
   def metricPrefix(): String
   def threadPrefix(): String
 
+  // mark socket.send.buffer.bytes socket发送缓冲区大小
   private val sendBufferSize = config.socketSendBufferBytes
+  // mark socket.receive.buffer.bytes socket接收缓冲区大小
   private val recvBufferSize = config.socketReceiveBufferBytes
+  // mark socket.listen.backlog.size 指定了连接处理最大等待长度
   private val listenBacklogSize = config.socketListenBacklogSize
 
+  // mark 创建 nio selector
   private val nioSelector = NSelector.open()
+
+  // mark 创建服务器套接字
   private[network] val serverChannel = openServerSocket(endPoint.host, endPoint.port, listenBacklogSize)
+  // mark 用于保存Processor的容器
   private[network] val processors = new ArrayBuffer[Processor]()
   // Build the metric name explicitly in order to keep the existing name for compatibility
+  // mark 生成指标名称
   private val blockedPercentMeterMetricName = explicitMetricName(
     "kafka.network",
     "Acceptor",
     s"${metricPrefix()}AcceptorBlockedPercent",
     Map(ListenerMetricTag -> endPoint.listenerName.value))
+
   private val blockedPercentMeter = newMeter(blockedPercentMeterMetricName,"blocked time", TimeUnit.NANOSECONDS)
+
+  // mark 当前Processor指针
   private var currentProcessorIndex = 0
+  // mark 节流套接字
   private[network] val throttledSockets = new mutable.PriorityQueue[DelayedCloseSocket]()
+  // mark 启动标志
   private var started = false
+  // mark 异步启动结果
   private[network] val startFuture = new CompletableFuture[Void]()
 
+  // mark 将自己包装成kafka thread
   val thread = KafkaThread.nonDaemon(
     s"${threadPrefix()}-kafka-socket-acceptor-${endPoint.listenerName}-${endPoint.securityProtocol}-${endPoint.port}",
     this)
 
+  // mark 这里应该是进行任务的编排 实际没有触发
   startFuture.thenRun(() => synchronized {
     if (!shouldRun.get()) {
       debug(s"Ignoring start future for ${endPoint.listenerName} since the acceptor has already been shut down.")
@@ -664,20 +734,33 @@ private[kafka] abstract class Acceptor(val socketServer: SocketServer,
   }
 
   /**
-   * Create a server socket to listen for connections on.
+   * 创建一个服务器套接字，用于监听连接。
+   *
+   * @param host 服务器的主机名或IP地址如果为空或空白，则监听所有可用网卡
+   * @param port 服务器监听的端口号
+   * @param listenBacklogSize 监听队列的大小，即未被接受的连接请求的最大数量
+   * @return 返回一个打开的ServerSocketChannel，用于接受连接
+   *
+   * 此方法首先根据提供的主机和端口信息创建一个套接字地址然后，它打开一个非阻塞模式的服务器套接字通道，
+   * 并设置接收缓冲区大小如果指定了非默认值如果绑定到套接字地址时发生错误，它将抛出一个KafkaException异常
    */
   private def openServerSocket(host: String, port: Int, listenBacklogSize: Int): ServerSocketChannel = {
+    // mark 创建一个套接字地址
     val socketAddress =
       if (Utils.isBlank(host))
         new InetSocketAddress(port)
       else
         new InetSocketAddress(host, port)
     val serverChannel = ServerSocketChannel.open()
+    // mark 设置为非阻塞模式
     serverChannel.configureBlocking(false)
+
+    // mark 设置接收缓冲区大小
     if (recvBufferSize != Selectable.USE_DEFAULT_BUFFER_SIZE)
       serverChannel.socket().setReceiveBufferSize(recvBufferSize)
 
     try {
+      // mark 绑定到套接字地址
       serverChannel.socket.bind(socketAddress, listenBacklogSize)
       info(s"Awaiting socket connections on ${socketAddress.getHostString}:${serverChannel.socket.getLocalPort}.")
     } catch {
@@ -791,20 +874,35 @@ private[kafka] abstract class Acceptor(val socketServer: SocketServer,
    */
   def wakeup(): Unit = nioSelector.wakeup()
 
+  /**
+   * 增加处理器方法
+   * 该方法用于同步地增加处理器，确保在多线程环境下安全地修改处理器列表
+   *
+   * @param toCreate 需要增加的处理器数量
+   */
   def addProcessors(toCreate: Int): Unit = synchronized {
+    // mark 获取当前Acceptor的监听器名称
     val listenerName = endPoint.listenerName
+    // mark 获取当前Acceptor安全配置
     val securityProtocol = endPoint.securityProtocol
+
     val listenerProcessors = new ArrayBuffer[Processor]()
 
+
     for (_ <- 0 until toCreate) {
+      // mark 创建Processor处理器
       val processor = newProcessor(socketServer.nextProcessorId(), listenerName, securityProtocol)
+
       listenerProcessors += processor
+      // mark 将Processor挂载到请求通道上面
       requestChannel.addProcessor(processor)
 
+      // mark 如果Acceptor已经启动，则启动Processor
       if (started) {
         processor.start()
       }
     }
+    // mark 添加到processors列表中
     processors ++= listenerProcessors
   }
 
@@ -870,6 +968,7 @@ private[kafka] class Processor(
 ) extends Runnable with KafkaMetricsGroup {
   val shouldRun = new AtomicBoolean(true)
 
+  // mark 包装成Kafka线程
   val thread = KafkaThread.nonDaemon(threadName, this)
 
   private object ConnectionId {
@@ -887,8 +986,11 @@ private[kafka] class Processor(
     override def toString: String = s"$localHost:$localPort-$remoteHost:$remotePort-$index"
   }
 
+  // mark 用于存放新的连接套接字
   private val newConnections = new ArrayBlockingQueue[SocketChannel](connectionQueueSize)
+  // mark 用于存放正在处理的请求
   private val inflightResponses = mutable.Map[String, RequestChannel.Response]()
+  // mark 用于存放请求处理结果
   private val responseQueue = new LinkedBlockingDeque[RequestChannel.Response]()
 
   private[kafka] val metricTags = mutable.LinkedHashMap(
@@ -905,11 +1007,15 @@ private[kafka] class Processor(
     Map(NetworkProcessorMetricTag -> id.toString)
   )
 
+  // mark 统计因为超时被关闭的连接数量
   val expiredConnectionsKilledCount = new CumulativeSum()
+  //
   private val expiredConnectionsKilledCountMetricName = metrics.metricName("expired-connections-killed-count", MetricsGroup, metricTags)
   metrics.addMetric(expiredConnectionsKilledCountMetricName, expiredConnectionsKilledCount)
 
+  // mark 创建kafka Selector
   private[network] val selector = createSelector(
+    // mark 这里的通道构建器的生成过程与客户端相同 只有SASL模式下会有差异
     ChannelBuilders.serverChannelBuilder(
       listenerName,
       listenerName == config.interBrokerListenerName,
@@ -923,12 +1029,20 @@ private[kafka] class Processor(
     )
   )
 
-  // Visible to override for testing
+  /**
+   * 创建一个KSelector实例
+   *
+   * 此方法根据提供的ChannelBuilder实例创建一个KSelector对象KSelector是用于管理连接和处理网络事件的核心组件
+   *
+   * @param channelBuilder 用于构建通道的配置对象，不同的配置对象可能具备不同的配置能力
+   * @return 返回配置好的KSelector实例
+   */
   protected[network] def createSelector(channelBuilder: ChannelBuilder): KSelector = {
     channelBuilder match {
-      case reconfigurable: Reconfigurable => config.addReconfigurable(reconfigurable)
-      case _ =>
+        case reconfigurable: Reconfigurable => config.addReconfigurable(reconfigurable)
+        case _ =>
     }
+    // mark 创建 kafka selector
     new KSelector(
       maxRequestSize,
       connectionsMaxIdleMs,
@@ -944,9 +1058,10 @@ private[kafka] class Processor(
       logContext)
   }
 
-  // Connection ids have the format `localAddr:localPort-remoteAddr:remotePort-index`. The index is a
-  // non-negative incrementing value that ensures that even if remotePort is reused after a connection is
-  // closed, connection ids are not reused while requests from the closed connection are being processed.
+  // 连接 ID 的格式为 `localAddr:localPort-remoteAddr:remotePort-index`。该索引是一个
+  // 非负递增值，确保即使在连接建立后重用remotePort
+  // 已关闭，在处理来自已关闭连接的请求时，不会重用连接 ID。
+  // mark 指向下一个需要处理连接的索引
   private var nextConnectionIndex = 0
 
   override def run(): Unit = {
@@ -954,7 +1069,9 @@ private[kafka] class Processor(
       while (shouldRun.get()) {
         try {
           // setup any new connections that have been queued up
+          // mark 这个地方会取出排队套接字 并在Kafka selector中进行注册
           configureNewConnections()
+
           // register any new responses for writing
           processNewResponses()
           poll()
@@ -995,10 +1112,14 @@ private[kafka] class Processor(
 
   private def processNewResponses(): Unit = {
     var currentResponse: RequestChannel.Response = null
+    // mark 遍历知道将响应队列清空
     while ({currentResponse = dequeueResponse(); currentResponse != null}) {
+      // mark 获取连接ID
       val channelId = currentResponse.request.context.connectionId
       try {
+        // mark 相应类型抉择
         currentResponse match {
+
           case response: NoOpResponse =>
             // There is no response to send to the client, we need to read more pipelined requests
             // that are sitting in the server's socket buffer
@@ -1152,6 +1273,8 @@ private[kafka] class Processor(
 
   private def updateRequestMetrics(response: RequestChannel.Response): Unit = {
     val request = response.request
+    // mark 通过调用 openOrClosingChannel 获取当前响应对应的通道 可能是打开的也可能是关闭的
+    // mark 获取通道在网络IO上的所消耗的时间
     val networkThreadTimeNanos = openOrClosingChannel(request.context.connectionId).fold(0L)(_.getAndResetNetworkThreadTimeNanos())
     request.updateRequestMetrics(networkThreadTimeNanos, response)
   }
@@ -1221,17 +1344,21 @@ private[kafka] class Processor(
   }
 
   /**
-   * Register any new connections that have been queued up. The number of connections processed
-   * in each iteration is limited to ensure that traffic and connection close notifications of
-   * existing channels are handled promptly.
+   * 注册已排队的任何新连接。处理的连接数
+   * 在每次迭代中进行限制，以确保流量和连接关闭通知
+   * 现有渠道得到及时处理。
    */
   private def configureNewConnections(): Unit = {
     var connectionsProcessed = 0
+    // mark 如果已处理连接小于 connectionQueueSize 并且排队连接集合不为空 则开始处理
     while (connectionsProcessed < connectionQueueSize && !newConnections.isEmpty) {
+      // mark 从队列中过去出一个连套接字
       val channel = newConnections.poll()
       try {
         debug(s"Processor $id listening to new connection from ${channel.socket.getRemoteSocketAddress}")
+        // mark 将套接字注册到Kafka Selector中
         selector.register(connectionId(channel.socket), channel)
+        // mark 已处理链接+1
         connectionsProcessed += 1
       } catch {
         // We explicitly catch all exceptions and close the socket to avoid a socket leak.
@@ -1259,6 +1386,12 @@ private[kafka] class Processor(
   }
 
   // 'protected` to allow override for testing
+  /**
+   * 根据提供的socket信息生成一个连接ID
+   *
+   * @param socket 代表网络连接的Socket对象
+   * @return 生成的连接ID字符串
+   */
   protected[network] def connectionId(socket: Socket): String = {
     val localHost = socket.getLocalAddress.getHostAddress
     val localPort = socket.getLocalPort
@@ -1274,10 +1407,17 @@ private[kafka] class Processor(
     wakeup()
   }
 
+  /**
+   * 从响应队列中取出一个响应对象
+   * @return 取出的响应对象，如果队列为空则返回null
+   */
   private def dequeueResponse(): RequestChannel.Response = {
+    // mark 从响应队列中取出一个响应
     val response = responseQueue.poll()
-    if (response != null)
+    if (response != null) {
+      // mark 记录一下响应出队时间戳
       response.request.responseDequeueTimeNanos = Time.SYSTEM.nanoseconds
+    }
     response
   }
 
@@ -1372,20 +1512,34 @@ object ConnectionQuotas {
 
 class ConnectionQuotas(config: KafkaConfig, time: Time, metrics: Metrics) extends Logging with AutoCloseable {
 
+  // mark 默认每个IP最大连接数 （max.connections.per.ip）
   @volatile private var defaultMaxConnectionsPerIp: Int = config.maxConnectionsPerIp
+
+  // mark max.connections.per.ip.overrides 改配置用于指定某个IP专属的连接数 <ip1>:<limit1>,<ip2>:<limit2>,...
   @volatile private var maxConnectionsPerIpOverrides = config.maxConnectionsPerIpOverrides.map { case (host, count) => (InetAddress.getByName(host), count) }
+
+  // mark 指定当前broker最大连接数 max.connections
   @volatile private var brokerMaxConnections = config.maxConnections
+  // mark broker之间通讯的监听器名称
   private val interBrokerListenerName = config.interBrokerListenerName
+  // mark IP对应的连接计数器
   private val counts = mutable.Map[InetAddress, Int]()
 
   // Listener counts and configs are synchronized on `counts`
+  // mark 监听名称连接计数器
   private val listenerCounts = mutable.Map[ListenerName, Int]()
+
+  // mark 每个监听器的最大连接数
   private[network] val maxConnectionsPerListener = mutable.Map[ListenerName, ListenerConnectionQuota]()
+
   @volatile private var totalCount = 0
   // updates to defaultConnectionRatePerIp or connectionRatePerIp must be synchronized on `counts`
+  // mark 默认每个IP的连接率
   @volatile private var defaultConnectionRatePerIp = QuotaConfigs.IP_CONNECTION_RATE_DEFAULT.intValue()
+  // mark 每个IP的连接率
   private val connectionRatePerIp = new ConcurrentHashMap[InetAddress, Int]()
   // sensor that tracks broker-wide connection creation rate and limit (quota)
+  // mark broker-wide connection creation rate and limit (quota)
   private val brokerConnectionRateSensor = getOrCreateConnectionRateQuotaSensor(config.maxConnectionCreationRate, BrokerQuotaEntity)
   private val maxThrottleTimeMs = TimeUnit.SECONDS.toMillis(config.quotaWindowSizeSeconds.toLong)
 
@@ -1483,6 +1637,15 @@ class ConnectionQuotas(config: KafkaConfig, time: Time, metrics: Metrics) extend
     connectionRatePerIp.getOrDefault(ip, defaultConnectionRatePerIp)
   }
 
+  /**
+   * 为指定的监听器添加连接数限制配置
+   *
+   * 此方法用于为Kafka服务器的特定监听器添加一个连接数限制配置它确保每个监听器都有一个对应的连接数限制配置，
+   * 并根据配置前缀加载特定于该监听器的配置值
+   *
+   * @param config Kafka服务器的配置对象，用于获取监听器的配置信息
+   * @param listenerName 监听器名称，用于标识特定的监听器
+   */
   private[network] def addListener(config: KafkaConfig, listenerName: ListenerName): Unit = {
     counts.synchronized {
       if (!maxConnectionsPerListener.contains(listenerName)) {

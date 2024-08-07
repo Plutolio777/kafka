@@ -77,6 +77,7 @@ public class SecurityUtils {
     }
 
     public static void addConfiguredSecurityProviders(Map<String, ?> configs) {
+        // mark 获取security.providers配置 改配置是指定java安全框架的实现类
         String securityProviderClassesStr = (String) configs.get(SecurityConfig.SECURITY_PROVIDERS_CONFIG);
         if (securityProviderClassesStr == null || securityProviderClassesStr.equals("")) {
             return;
@@ -84,9 +85,12 @@ public class SecurityUtils {
         try {
             String[] securityProviderClasses = securityProviderClassesStr.replaceAll("\\s+", "").split(",");
             for (int index = 0; index < securityProviderClasses.length; index++) {
+                // mark 反射生成 安全提供者的创建类
                 SecurityProviderCreator securityProviderCreator =
                     (SecurityProviderCreator) Class.forName(securityProviderClasses[index]).getConstructor().newInstance();
+                // mark 配置
                 securityProviderCreator.configure(configs);
+                // mark 启用
                 Security.insertProviderAt(securityProviderCreator.getProvider(), index + 1);
             }
         } catch (ClassCastException e) {

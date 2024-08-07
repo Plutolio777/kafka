@@ -19,27 +19,27 @@ package org.apache.kafka.common.network;
 import java.io.Closeable;
 
 /**
- * Metadata about a channel is provided in various places in the network stack. This
- * registry is used as a common place to collect them.
+ * 有关通道的元数据在网络堆栈的各个位置提供。这
+ * 注册表被用作收集它们的公共场所。
  */
 public interface ChannelMetadataRegistry extends Closeable {
 
     /**
-     * Register information about the SSL cipher we are using.
-     *  Re-registering the information will overwrite the previous one.
+     * 注册有关我们正在使用的 SSL 密码的信息。
+     * 重新注册信息将覆盖之前的信息。
      */
     void registerCipherInformation(CipherInformation cipherInformation);
 
     /**
-     * Get the currently registered cipher information.
+     * 获取当前注册的密码信息。
      */
     CipherInformation cipherInformation();
 
     /**
-     * Register information about the client client we are using.
-     * Depending on the clients, the ApiVersionsRequest could be received
-     * multiple times or not at all. Re-registering the information will
-     * overwrite the previous one.
+     * 注册我们正在使用的客户端信息。
+     * 根据客户端的不同，可以接收 ApiVersionsRequest
+     * 多次或根本不。重新登记信息即可
+     * 覆盖前一个。
      */
     void registerClientInformation(ClientInformation clientInformation);
 

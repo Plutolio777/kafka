@@ -23,11 +23,14 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Describes whether the server should require or request client authentication.
+ * 描述服务器是否应该要求或请求客户端身份验证。
  */
 public enum SslClientAuth {
+    // mark 强制客户端进行身份验证
     REQUIRED,
+    // mark 客户端如果提供了证书就验证如果没提供就不认证
     REQUESTED,
+    // mark 不需要客户端身份验证
     NONE;
 
     public static final List<SslClientAuth> VALUES =

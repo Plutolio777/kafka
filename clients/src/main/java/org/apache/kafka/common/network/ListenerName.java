@@ -80,9 +80,16 @@ public final class ListenerName {
         return "ListenerName(" + value + ")";
     }
 
+    /**
+     * 构建配置前缀字符串。 (listener.name.{name}.)
+     *
+     * @return 返回构建好的配置前缀字符串。
+     */
     public String configPrefix() {
+        // mark 拼接配置前缀，静态前缀、动态值（转换为小写）和连接符号。
         return CONFIG_STATIC_PREFIX + "." + value.toLowerCase(Locale.ROOT) + ".";
     }
+
 
     public String saslMechanismConfigPrefix(String saslMechanism) {
         return configPrefix() + saslMechanismPrefix(saslMechanism);

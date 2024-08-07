@@ -143,13 +143,14 @@ public class ChannelBuilders {
                                          Time time,
                                          LogContext logContext,
                                          Supplier<ApiVersionsResponse> apiVersionSupplier) {
-        // mark 获取构建连接通道所需要的配置
+        // mark 1.获取构建连接通道所需要的配置
         Map<String, Object> configs = channelBuilderConfigs(config, listenerName);
 
         ChannelBuilder channelBuilder;
-        // mark 根据安全协议创建不同的通道对象
+        // mark 2.根据安全协议创建不同的通道对象
         switch (securityProtocol) {
             case SSL:
+                // mark 提供了SSL相关的支持
                 requireNonNullMode(mode, securityProtocol);
                 channelBuilder = new SslChannelBuilder(mode, listenerName, isInterBrokerListener, logContext);
                 break;
@@ -219,27 +220,28 @@ public class ChannelBuilders {
     }
 
     /**
-     * 获取连接通道构建器所需要的配置
+     * 获取连接通道构建器所需要的配置 （主要工作就是解析针对listener.name级别生效的配置）
      * @return 一个可变的 RecordingMap。从 RecordingMap 获取的元素被标记为“已使用”。
      */
     @SuppressWarnings("unchecked")
     static Map<String, Object> channelBuilderConfigs(final AbstractConfig config, final ListenerName listenerName) {
         Map<String, Object> parsedConfigs;
-        // mark 这里会构建配置 留了一个钩子  listener.name.{{name}}.porps 可以指定监听器所需要的配置
+        // mark 这里会构建配置 留了一个钩子  listener.name.{{name}}.props 可以指定监听器所需要的配置
         if (listenerName == null)
             parsedConfigs = (Map<String, Object>) config.values();
         else
+            // mark 提取针对listener.name级别的配置并覆盖原始配置
             parsedConfigs = config.valuesWithPrefixOverride(listenerName.configPrefix());
 
         // mark 这里遍历一下原始的配置
         config.originals().entrySet().stream()
                 // mark 排除已经被解析过的配置
             .filter(e -> !parsedConfigs.containsKey(e.getKey())) // exclude already parsed configs
-            // mark 排除已经被解析过的带listener名称前缀的配置
+                // mark listener.name.{{name}}.props 这种形式的key前面已经提取过了 所以没用了
             // exclude already parsed listener prefix configs
             .filter(e -> !(listenerName != null && e.getKey().startsWith(listenerName.configPrefix()) &&
                     parsedConfigs.containsKey(e.getKey().substring(listenerName.configPrefix().length()))))
-            // mark 如果“listener.name”，则排除像“{mechanism}.some.prop”这样的键。解析的配置中存在前缀并且键“some.prop”存在。
+                // mark listener.name.{{name}}.{anything}.props 这种在前面也提取过了 所以没用了
             // exclude keys like `{mechanism}.some.prop` if "listener.name." prefix is present and key `some.prop` exists in parsed configs.
             .filter(e -> !(listenerName != null && parsedConfigs.containsKey(e.getKey().substring(e.getKey().indexOf('.') + 1))))
             // mark 添加到最终的配置中

@@ -300,14 +300,31 @@ object RequestChannel extends Logging {
 
   sealed abstract class Response(val request: Request) {
 
+    /**
+     * 获取请求中的处理器信息。
+     *
+     * @return 处理器的标识符。
+     */
     def processor: Int = request.processor
 
+    /**
+     * 日志记录功能，用于记录响应信息。
+     * 当前未指定具体的日志记录方式，留空表示不进行日志记录。
+     *
+     * @return 一个空的Option，表示没有日志记录。
+     */
     def responseLog: Option[JsonNode] = None
 
+    /**
+     * 定义在请求处理完成后需要执行的操作。
+     * 当前未指定具体的操作，留空表示处理完成后不执行额外操作。
+     *
+     * @return 一个空的Option，表示处理完成后没有额外操作。
+     */
     def onComplete: Option[Send => Unit] = None
   }
 
-  /** responseLogValue should only be defined if request logging is enabled */
+  /** 仅当启用请求日志记录时才应定义responseLogValue */
   class SendResponse(request: Request,
                      val responseSend: Send,
                      val responseLogValue: Option[JsonNode],
@@ -341,13 +358,19 @@ object RequestChannel extends Logging {
   }
 }
 
-class RequestChannel(val queueSize: Int,
-                     val metricNamePrefix: String,
-                     time: Time,
-                     val metrics: RequestChannel.Metrics) extends KafkaMetricsGroup {
+class RequestChannel(val queueSize: Int, // mark 通道最大大小
+                     val metricNamePrefix: String, // mark 指标前缀
+                     time: Time, // mark 时间工具类
+                     val metrics: RequestChannel.Metrics // mark
+                    ) extends KafkaMetricsGroup {
   import RequestChannel._
+
+  // mark 请求队列
   private val requestQueue = new ArrayBlockingQueue[BaseRequest](queueSize)
+  // mark 处理器注册表
   private val processors = new ConcurrentHashMap[Int, Processor]()
+
+  // mark 初始化指标
   val requestQueueSizeMetricName = metricNamePrefix.concat(RequestQueueSizeMetric)
   val responseQueueSizeMetricName = metricNamePrefix.concat(ResponseQueueSizeMetric)
 

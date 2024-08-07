@@ -29,6 +29,7 @@ import org.apache.kafka.common.requests.{AbstractRequest, AbstractResponse, Enve
 import scala.compat.java8.OptionConverters._
 
 trait ForwardingManager {
+
   def forwardRequest(
     originalRequest: RequestChannel.Request,
     responseCallback: Option[AbstractResponse] => Unit

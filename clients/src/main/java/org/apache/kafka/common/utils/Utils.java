@@ -761,15 +761,18 @@ public final class Utils {
     }
 
     /**
-     * Check if the given ByteBuffer capacity
-     * @param existingBuffer ByteBuffer capacity to check
-     * @param newLength new length for the ByteBuffer.
-     * returns ByteBuffer
+     * 对buffer按照给定容量进行扩容
+     * @param existingBuffer 要检查的ByteBuffer容量
+     * @param newLength ByteBuffer的新长度
+     * 返回 ByteBuffer
      */
     public static ByteBuffer ensureCapacity(ByteBuffer existingBuffer, int newLength) {
         if (newLength > existingBuffer.capacity()) {
+            // mark 创建新的buffer
             ByteBuffer newBuffer = ByteBuffer.allocate(newLength);
+            // mark 旧buffer切换读模式
             existingBuffer.flip();
+            // mark 数据转移
             newBuffer.put(existingBuffer);
             return newBuffer;
         }

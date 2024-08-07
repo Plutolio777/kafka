@@ -36,20 +36,41 @@ public class PlaintextTransportLayer implements TransportLayer {
     private final Principal principal = KafkaPrincipal.ANONYMOUS;
 
     public PlaintextTransportLayer(SelectionKey key) throws IOException {
+        // mark 挂载SelectionKey
         this.key = key;
+        // mark 挂载 Socket
         this.socketChannel = (SocketChannel) key.channel();
     }
 
+    /**
+     * 检查传输层是否准备好。
+     * 明文传输无需准备
+     *
+     * @return 始终返回 {@code true}，指示对象已准备好。
+     */
     @Override
     public boolean ready() {
         return true;
     }
 
-    @Override
+    /**
+     * 尝试完成Socket连接。
+     * <p>
+     * 此方法用于在非阻塞模式下完成Socket连接的过程。当之前调用socketChannel.connect()方法尝试连接服务器时，
+     * 如果连接操作没有立即完成，将会返回false。此时，可以调用此方法来尝试完成剩余的连接过程。
+     * <p>
+     * 如果连接成功完成，将会修改SelectionKey的兴趣操作，从关注连接操作变为关注读操作，以便后续可以读取数据。
+     * <p>
+     * @return 如果连接成功完成，则返回true；否则返回false。
+     * @throws IOException 如果连接过程中发生I/O错误。
+     */
     public boolean finishConnect() throws IOException {
+        // mark 尝试完成Socket连接
         boolean connected = socketChannel.finishConnect();
-        if (connected)
+        if (connected) {
+            // mark 如果连接成功，修改SelectionKey的兴趣操作，从关注连接变为关注读
             key.interestOps(key.interestOps() & ~SelectionKey.OP_CONNECT | SelectionKey.OP_READ);
+        }
         return connected;
     }
 

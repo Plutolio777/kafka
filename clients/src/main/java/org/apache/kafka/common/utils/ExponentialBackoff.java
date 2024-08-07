@@ -20,7 +20,7 @@ package org.apache.kafka.common.utils;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * mark 指数退避算法的谁先
+ * mark 指数退避算法的实现
  * 一个用于保持参数并提供指数回退、指数重新连接回退、指数超时等值的工具类。
  * 公式为：
  * Backoff(attempts) = random(1 - jitter, 1 + jitter) * initialInterval * multiplier ^ attempts

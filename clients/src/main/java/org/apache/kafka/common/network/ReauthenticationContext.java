@@ -19,10 +19,11 @@ package org.apache.kafka.common.network;
 import java.util.Objects;
 
 /**
- * Defines the context in which an {@link Authenticator} is to be created during
- * a re-authentication.
+ * 定义在其中创建{@link Authenticator}的上下文
+ * 重新验证上下文。
  */
 public class ReauthenticationContext {
+
     private final NetworkReceive networkReceive;
     private final Authenticator previousAuthenticator;
     private final long reauthenticationBeginNanos;
